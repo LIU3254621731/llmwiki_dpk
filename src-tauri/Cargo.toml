@@ -1,0 +1,58 @@
+[package]
+name = "llmwiki"
+version = "0.2.1"
+description = "LLMWiki - LLM 知识维护工作台"
+authors = ["LLMWiki"]
+edition = "2021"
+
+[lib]
+name = "llmwiki_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+rusqlite = { version = "0.31", features = ["bundled"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+futures = "0.3"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+walkdir = "2"
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+env_logger = "0.11"
+parking_lot = "0.12"
+base64 = "0.22"
+hex = "0.4"
+deunicode = "1"
+strsim = "0.11"
+regex = "1"
+petgraph = "0.6"
+open = "5"
+zip = "2"               # 用于 DOCX 读取（DOCX 本质是 ZIP）
+scraper = "0.19"         # 用于 HTML 文本提取
+lopdf = "0.34"           # 用于 PDF 文本提取 + 内嵌图像提取
+encoding_rs = "0.8"      # 字符编码处理
+image = "0.25"           # 图像解码（JPEG/PNG → 像素数据）
+windows = { version = "0.58", features = [
+    "Media_Ocr",
+    "Graphics_Imaging",
+    "Storage_Streams",
+    "Foundation",
+] }                        # Windows 内置 OCR（扫描件 PDF 文本识别）
+ort = { version = "2.0.0-rc.12", features = ["download-binaries", "copy-dylibs"] }
+tokenizers = { version = "0.21", default-features = false, features = ["http", "fancy-regex"] }
+num_cpus = "1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,22 @@
+此目录存放 ONNX 嵌入模型文件。
+
+## 默认模型 (bge-small-zh-v1.5)
+
+需要下载以下文件并放入此目录：
+
+1. bge-small-zh-v1.5.onnx (~45MB)
+   下载地址: https://huggingface.co/BAAI/bge-small-zh-v1.5
+   导出 ONNX 格式: 使用 optimum-cli 或直接从 HF mirror 下载 ONNX 版本
+
+2. tokenizer.json
+   从 BAAI/bge-small-zh-v1.5 仓库下载 tokenizer.json 文件
+
+## 目录结构
+
+```
+resources/models/
+  ├── bge-small-zh-v1.5.onnx
+  └── tokenizer.json
+```
+
+这两个文件会被 Tauri 打包到应用资源中，运行时通过 resource_dir() API 自动解析路径。

@@ -1,0 +1,151 @@
+/* ═══════════════════════════════════════════════════════
+   LLMWiki Theme Tokens — VSCode-inspired light/dark
+   All components reference these variables exclusively.
+   Changing a variable here affects the entire UI.
+   ═══════════════════════════════════════════════════════ */
+
+/* ── Dark theme (default) ── */
+:root {
+  /* Core surfaces */
+  --background: #161616;
+  --card: #1c1c1c;
+  --card-hover: #222222;
+  --card-active: #252525;
+  --border: #2d2d2d;
+  --border-light: #363636;
+
+  /* Primary / accent */
+  --primary: #8b5cf6;
+  --primary-hover: #7c3aed;
+  --primary-foreground: #ffffff;
+  --primary-subtle: rgba(139, 92, 246, 0.10);
+
+  /* Text hierarchy */
+  --foreground: #d4d4d4;
+  --foreground-dim: #b0b0b0;
+  --foreground-muted: #909090;
+
+  /* Muted surfaces */
+  --muted: #3d3d3d;
+  --muted-foreground: #909090;
+
+  /* Semantic */
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --destructive-subtle: rgba(239, 68, 68, 0.10);
+  --success: #22c55e;
+  --success-subtle: rgba(34, 197, 94, 0.10);
+  --warning: #f59e0b;
+  --warning-subtle: rgba(245, 158, 11, 0.10);
+  --info: #3b82f6;
+  --info-subtle: rgba(59, 130, 246, 0.10);
+
+  /* Input fields */
+  --input-bg: #1a1a1a;
+  --input-border: #2d2d2d;
+  --input-focus: #8b5cf6;
+  --input-placeholder: #808080;
+
+  /* Chat bubbles */
+  --chat-user-bg: #8b5cf6;
+  --chat-user-text: #ffffff;
+  --chat-assistant-bg: #252525;
+  --chat-assistant-text: #d4d4d4;
+
+  /* Scrollbar */
+  --scrollbar-thumb: #3d3d3d;
+  --scrollbar-thumb-hover: #525252;
+  --scrollbar-track: transparent;
+
+  /* Icon sidebar */
+  --sidebar-bg: #1a1a1a;
+  --sidebar-hover: #252525;
+  --sidebar-active: rgba(139, 92, 246, 0.15);
+  --sidebar-active-indicator: #8b5cf6;
+  --sidebar-icon: #737373;
+  --sidebar-icon-active: #a78bfa;
+
+  /* Status bar */
+  --statusbar-bg: #1c1c1c;
+  --statusbar-border: #2d2d2d;
+
+  /* Badge */
+  --badge-bg: rgba(239, 68, 68, 0.15);
+  --badge-text: #ef4444;
+
+  /* Misc */
+  --ring: #8b5cf6;
+  --radius: 0.5rem;
+
+  /* Layout */
+  --sidebar-width: 60px;
+  --chatsidebar-width: 350px;
+  --statusbar-height: 32px;
+}
+
+/* ── Light theme ── */
+html:not(.dark) {
+  --background: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f3f3f3;
+  --card-active: #e8e8e8;
+  --border: #d4d4d4;
+  --border-light: #e8e8e8;
+
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-foreground: #ffffff;
+  --primary-subtle: rgba(59, 130, 246, 0.08);
+
+  --foreground: #1e1e1e;
+  --foreground-dim: #525252;
+  --foreground-muted: #696969;
+
+  --muted: #e5e5e5;
+  --muted-foreground: #696969;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --destructive-subtle: rgba(220, 38, 38, 0.08);
+  --success: #16a34a;
+  --success-subtle: rgba(22, 163, 74, 0.08);
+  --warning: #d97706;
+  --warning-subtle: rgba(217, 119, 6, 0.08);
+  --info: #2563eb;
+  --info-subtle: rgba(37, 99, 235, 0.08);
+
+  --input-bg: #ffffff;
+  --input-border: #d4d4d4;
+  --input-focus: #3b82f6;
+  --input-placeholder: #808080;
+
+  --chat-user-bg: #3b82f6;
+  --chat-user-text: #ffffff;
+  --chat-assistant-bg: #f3f3f3;
+  --chat-assistant-text: #1e1e1e;
+
+  --scrollbar-thumb: #d4d4d4;
+  --scrollbar-thumb-hover: #a3a3a3;
+  --scrollbar-track: transparent;
+
+  --sidebar-bg: #f3f3f3;
+  --sidebar-hover: #e8e8e8;
+  --sidebar-active: rgba(59, 130, 246, 0.08);
+  --sidebar-active-indicator: #3b82f6;
+  --sidebar-icon: #8c8c8c;
+  --sidebar-icon-active: #3b82f6;
+
+  --statusbar-bg: #f3f3f3;
+  --statusbar-border: #d4d4d4;
+
+  --badge-bg: rgba(220, 38, 38, 0.10);
+  --badge-text: #dc2626;
+
+  --ring: #7c3aed;
+  --radius: 0.5rem;
+}
+
+html {
+  background: var(--background);
+  color: var(--foreground);
+}
