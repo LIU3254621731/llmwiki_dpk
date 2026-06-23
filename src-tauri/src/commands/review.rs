@@ -1,4 +1,4 @@
-use std::sync::Arc;
+﻿use std::sync::Arc;
 use tauri::State;
 use crate::core::app_kernel::AppKernel;
 use crate::wiki::path_service::PathService;
@@ -138,6 +138,7 @@ fn apply_review_item_impl(
     kb_path: &str,
 ) -> Result<serde_json::Value, String> {
     use crate::dedup::dedup_service::DedupService;
+    use crate::review::review_engine::ReviewEngine;
 
     let conn = kernel.db.connect()?;
     let now_ts = chrono::Utc::now().to_rfc3339();
@@ -156,8 +157,8 @@ fn apply_review_item_impl(
         stored_page_type,
     ): (String, String, String, String, String, String, String, String, String, String, String) = conn
         .query_row(
-            "SELECT ri.review_id, r.task_id, ri.operation, COALESCE(ri.operation_type, ri.operation), ri.target_path, COALESCE(ri.new_content,''), COALESCE(ri.base_version_hash,''),
-                    COALESCE(ri.source_id,''), ri.status, COALESCE(ri.title,''), COALESCE(ri.page_type,'')
+            "SELECT ri.review_id, r.task_id, ri.operation, COALESCE(ri.operation_type, ri.operation), ri.target_path, COALESCE(ri.new_content,''''), COALESCE(ri.base_version_hash,''''),
+                    COALESCE(ri.source_id,''''), ri.status, COALESCE(ri.title,''''), COALESCE(ri.page_type,'''')
              FROM review_items ri JOIN reviews r ON ri.review_id = r.id
              WHERE ri.id = ?1 AND r.kb_id = ?2",
             rusqlite::params![item_id, kb_id],
@@ -165,27 +166,19 @@ fn apply_review_item_impl(
         )
         .map_err(|e| format!("读取审阅项失败: {}", e))?;
 
-    // 事件日志辅助函数
-    let log_event = |conn: &rusqlite::Connection, item_id: &str, old_status: &str, new_status: &str, action: &str, reason: &str| {
-        let event_id = uuid::Uuid::new_v4().to_string();
-        if let Err(e) = conn.execute(
-            "INSERT INTO review_item_events (id, review_item_id, old_status, new_status, action, reason, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![event_id, item_id, old_status, new_status, action, reason, &now_ts],
-        ) {
-            log::error!("[Review] 写入审阅项事件失败(item={}): {}", item_id, e);
-        }
-    };
-
-    // 检查状态：已处理的直接返回
-    if review_status == "applied" {
-        return Ok(serde_json::json!({"status": "already_applied"}));
-    }
-    if review_status == "rejected" {
-        return Err("该审阅项已被拒绝，不能应用".to_string());
-    }
-    if review_status == "skipped" {
-        return Ok(serde_json::json!({"status": "already_skipped"}));
+    // === STRICT STATE MACHINE VALIDATION ===
+    if !ReviewEngine::valid_transition(&review_status, "applying") {
+        let detail = match review_status.as_str() {
+            "applied" => "already applied",
+            "rejected" => "previously rejected",
+            "skipped" => "previously skipped",
+            "apply_failed" => "previously failed - reset to pending first",
+            other => other,
+        };
+        return Err(format!(
+            "Cannot accept review item: status is '{}' ({}). Only 'pending' or 'needs_manual_review' items can be accepted.",
+            review_status, detail
+        ));
     }
 
     let workspace_root = std::path::PathBuf::from(kb_path);
@@ -193,16 +186,13 @@ fn apply_review_item_impl(
     let writer = crate::wiki::wiki_writer::WikiWriter::new(kernel.db.clone());
     let normalized_target = PathService::normalize_workspace_path(&target_path);
 
-    // 设置 applying 状态
-    if let Err(e) = conn.execute(
-        "UPDATE review_items SET status = 'applying', updated_at = ?1 WHERE id = ?2",
-        rusqlite::params![now_ts, item_id],
-    ) {
-        log::error!("[review] 更新 review_item applying 失败 (item={}): {}", item_id, e);
-    }
-    log_event(&conn, item_id, &review_status, "applying", "apply_start", &format!("开始应用操作: {}", operation_type));
+    // Transition to applying with validation
+    ReviewEngine::set_item_status(
+        &conn, item_id, &review_status, "applying", "",
+        "apply_start", &format!("开始应用操作: {}", operation_type), &now_ts,
+    ).map_err(|e| format!("设置 applying 状态失败: {}", e))?;
 
-    // v0.2.1: 严格按 operation_type 分发
+    // v0.2.3: 严格按 operation_type 分发
     let result = match operation_type.as_str() {
         "create_page" | "create" => {
             let title = crate::wiki::markdown_indexer::MarkdownIndexer::best_title(
@@ -211,14 +201,14 @@ fn apply_review_item_impl(
             if title.trim().is_empty() || title == "Untitled"
                 || crate::wiki::markdown_indexer::MarkdownIndexer::looks_like_generated_page_id(&title)
             {
-                log_event(&conn, item_id, "applying", "needs_manual_review", "apply_blocked", "缺少可用标题");
-                conn.execute(
-                    "UPDATE review_items SET status = 'needs_manual_review', apply_error = ?1, updated_at = ?2 WHERE id = ?3",
-                    rusqlite::params!["缺少可用标题，未自动生成 page-xxx 页面", now_ts, item_id],
-                ).map_err(|e| format!("更新审阅项状态失败: {}", e))?;
+                let err_msg = "缺少可用标题，未自动生成 page-xxx 页面";
+                ReviewEngine::set_item_status(
+                    &conn, item_id, "applying", "needs_manual_review", err_msg,
+                    "apply_blocked", "缺少可用标题", &now_ts,
+                ).map_err(|e| format!("设置 needs_manual_review 失败: {}", e))?;
                 return Ok(serde_json::json!({
                     "status": "needs_manual_review",
-                    "message": "缺少可用标题，未自动生成 page-xxx 页面"
+                    "message": err_msg
                 }));
             }
             let metadata = crate::wiki::markdown_indexer::MarkdownIndexer::extract_metadata(
@@ -231,19 +221,39 @@ fn apply_review_item_impl(
             } else { stored_page_type };
             let canonical = PathService::generate_safe_name(&title);
 
-            // v0.2.1: 创建前再次查重
+            // v0.2.3: Check if target file already exists → auto-convert to update
+            let auto_converted = !normalized_target.is_empty() && {
+                let target_abs = PathService::resolve_workspace_path(&workspace_root, &normalized_target);
+                target_abs.exists()
+            };
+            if auto_converted {
+                log::info!("[review] create_page auto-converted to update_page: target already exists at {}", normalized_target);
+                let target_abs = PathService::resolve_workspace_path(&workspace_root, &normalized_target);
+                let current_content = std::fs::read_to_string(&target_abs)
+                    .map_err(|e| format!("读取已存在页面失败 ({}): {}", normalized_target, e))?;
+                if !base_version_hash.is_empty() {
+                    let current_hash = PathService::content_hash(&current_content);
+                    if current_hash != base_version_hash {
+                        return Err(format!("目标页面已被修改，base_version_hash 不匹配: {}", normalized_target));
+                    }
+                }
+                let wr = writer.update_page_full(kb_id, &wiki_dir, &normalized_target, &new_content, &task_id)?;
+                Ok::<crate::wiki::wiki_writer::WikiWriteResult, String>(wr)
+            } else {
+                // v0.2.1: 创建前再次查重
             if let Ok(dedup) = DedupService::find_duplicates(&kernel.db, kb_id, &title) {
                 if dedup.is_duplicate && dedup.suggested_operation == "update_page" {
                     if let Some(ref best) = dedup.best_match {
-                        log_event(&conn, item_id, "applying", "needs_manual_review", "duplicate_detected",
-                            &format!("创建前检测到重复页面「{}」(相似度: {:.0}%)", best.matched_title, best.similarity * 100.0));
-                        conn.execute(
-                            "UPDATE review_items SET status = 'needs_manual_review', apply_error = ?1, updated_at = ?2 WHERE id = ?3",
-                            rusqlite::params![format!("疑似与已有页面「{}」重复，已暂停创建供您确认", best.matched_title), now_ts, item_id],
-                        ).map_err(|e| format!("更新审阅项状态失败: {}", e))?;
+                        let dup_msg = format!("疑似与已有页面「{}」重复，已暂停创建供您确认", best.matched_title);
+                        ReviewEngine::set_item_status(
+                            &conn, item_id, "applying", "needs_manual_review", &dup_msg,
+                            "duplicate_detected",
+                            &format!("创建前检测到重复页面「{}」(相似度: {:.0}%)", best.matched_title, best.similarity * 100.0),
+                            &now_ts,
+                        ).map_err(|e| format!("设置 needs_manual_review 失败: {}", e))?;
                         return Ok(serde_json::json!({
                             "status": "needs_manual_review",
-                            "message": format!("疑似与已有页面「{}」重复", best.matched_title),
+                            "message": dup_msg,
                             "duplicate_candidate": true,
                             "matched_page": best.matched_title,
                             "matched_path": best.matched_path,
@@ -269,91 +279,114 @@ fn apply_review_item_impl(
                 "UPDATE review_items SET target_path = ?1, title = ?2, page_type = ?3 WHERE id = ?4",
                 rusqlite::params![wr.relative_path, title, page_type, item_id],
             ).map_err(|e| format!("更新审阅项路径失败: {}", e))?;
-            wr
+            Ok(wr)
+            } // end else (auto-converted)
         }
         "update_page" | "update" => {
             if normalized_target.is_empty() {
                 return Err("更新操作缺少目标路径".to_string());
             }
             let target_abs = PathService::resolve_workspace_path(&workspace_root, &normalized_target);
-            // Atomic read: eliminate TOCTOU race between exists() check and read_to_string()
-            let current_content = match std::fs::read_to_string(&target_abs) {
-                Ok(content) => content,
+            let wr = match std::fs::read_to_string(&target_abs) {
+                Ok(current_content) => {
+                    if !base_version_hash.is_empty() {
+                        let current_hash = PathService::content_hash(&current_content);
+                        if current_hash != base_version_hash {
+                            return Err(format!("目标页面已被修改，base_version_hash 不匹配: {}", normalized_target));
+                        }
+                    }
+                    let wr = writer.update_page_full(kb_id, &wiki_dir, &normalized_target, &new_content, &task_id)?;
+
+                    // LinkSanitizer: 检测 staging 页面
+                    let was_staging: bool = conn
+                        .query_row(
+                            "SELECT content_hash = 'staging' FROM wiki_pages WHERE kb_id = ?1 AND path = ?2",
+                            rusqlite::params![kb_id, normalized_target],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(false);
+                    if was_staging {
+                        log::info!("[review] staging 页面被接受: {} → 覆写占位文件并激活", normalized_target);
+                        let _ = conn.execute(
+                            "UPDATE link_sanitizer_log SET action = 'resolved', details = details || ' [审批通过]' WHERE placeholder_path = ?1 AND kb_id = ?2 AND action = 'ai_completion'",
+                            rusqlite::params![normalized_target, kb_id],
+                        );
+                        let _ = kernel.event_bus.emit_notification(
+                            "info",
+                            "死链已修复",
+                            &format!("「{}」的 AI 补全内容已通过审阅并激活", normalized_target),
+                        );
+                    }
+                    Ok::<crate::wiki::wiki_writer::WikiWriteResult, String>(wr)
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    // v0.2.1: 目标不存在 → 提示用户，不静默转换
-                    log_event(&conn, item_id, "applying", "needs_manual_review", "target_missing",
-                        &format!("更新目标文件不存在: {}", normalized_target));
+                    // v0.2.3: Auto-convert update_page → create_page when target missing on disk
+                    log::info!("[review] update_page auto-converted to create_page: target not found at {}", normalized_target);
                     conn.execute(
-                        "UPDATE review_items SET status = 'needs_manual_review', apply_error = ?1, updated_at = ?2 WHERE id = ?3",
-                        rusqlite::params![format!("目标页面「{}」不存在，请确认是否转为创建页面", normalized_target), now_ts, item_id],
-                    ).map_err(|e| format!("更新审阅项状态失败: {}", e))?;
-                    return Ok(serde_json::json!({
-                        "status": "needs_manual_review",
-                        "message": format!("目标页面「{}」不存在，是否转为创建页面？", normalized_target),
-                        "missing_target": true,
-                    }));
+                        "UPDATE review_items SET auto_converted_from_update = 1 WHERE id = ?1",
+                        rusqlite::params![item_id],
+                    ).ok();
+                    let title = crate::wiki::markdown_indexer::MarkdownIndexer::best_title(
+                        &new_content, &normalized_target, Some(&stored_title),
+                    );
+                    let page_type = if stored_page_type.trim().is_empty() {
+                        PathService::path_to_page_type(&normalized_target).to_string()
+                    } else { stored_page_type };
+                    let canonical = PathService::generate_safe_name(&title);
+                    let wr = writer.create_page_full(
+                        kb_id, &wiki_dir, &page_type, &title, &canonical,
+                        &new_content, "", "[]", &task_id,
+                        if source_id.is_empty() { None } else { Some(source_id.as_str()) },
+                    ).map_err(|e| format!("自动转换为创建页面失败: {}", e))?;
+                    conn.execute(
+                        "UPDATE review_items SET target_path = ?1, title = ?2, page_type = ?3 WHERE id = ?4",
+                        rusqlite::params![wr.relative_path, title, page_type, item_id],
+                    ).map_err(|e| format!("更新审阅项路径失败: {}", e))?;
+                    Ok::<crate::wiki::wiki_writer::WikiWriteResult, String>(wr)
                 }
                 Err(e) => return Err(format!("读取目标页面失败 ({}): {}", normalized_target, e)),
-            };
-            if !base_version_hash.is_empty() {
-                let current_hash = PathService::content_hash(&current_content);
-                if current_hash != base_version_hash {
-                    return Err(format!("目标页面已被修改，base_version_hash 不匹配: {}", normalized_target));
-                }
-            }
-            let wr = writer.update_page_full(kb_id, &wiki_dir, &normalized_target, &new_content, &task_id)?;
-
-            // LinkSanitizer: 检测 staging 页面的接受 — 标记为已解决
-            let was_staging: bool = conn
-                .query_row(
-                    "SELECT content_hash = 'staging' FROM wiki_pages WHERE kb_id = ?1 AND path = ?2",
-                    rusqlite::params![kb_id, normalized_target],
-                    |row| row.get(0),
-                )
-                .map_err(|e| {
-                    log::error!("[review] 查询 staging 状态失败 (page={}): {}", normalized_target, e);
-                    false
-                })
-                .unwrap_or(false);
-            if was_staging {
-                log::info!("[review] staging 页面被接受: {} → 覆写占位文件并激活", normalized_target);
-                let _ = conn.execute(
-                    "UPDATE link_sanitizer_log SET action = 'resolved', details = details || ' [审批通过]' WHERE placeholder_path = ?1 AND kb_id = ?2 AND action = 'ai_completion'",
-                    rusqlite::params![normalized_target, kb_id],
-                );
-                let _ = kernel.event_bus.emit_notification(
-                    "info",
-                    "死链已修复",
-                    &format!("「{}」的 AI 补全内容已通过审阅并激活", normalized_target),
-                );
-            }
-            wr
+            }?;
+            Ok(wr)
         }
         "append_section" | "append" => {
             if normalized_target.is_empty() {
                 return Err("追加操作缺少目标路径".to_string());
             }
             let target_abs = PathService::resolve_workspace_path(&workspace_root, &normalized_target);
-            // Atomic: try read first to avoid TOCTOU race between exists() and read_to_string()
-            let existing = match std::fs::read_to_string(&target_abs) {
-                Ok(content) => content,
+            let wr = match std::fs::read_to_string(&target_abs) {
+                Ok(existing) => {
+                    let combined = format!("{}\n\n{}", existing, new_content);
+                    let wr = writer.update_page_full(kb_id, &wiki_dir, &normalized_target, &combined, &task_id)?;
+                    Ok::<crate::wiki::wiki_writer::WikiWriteResult, String>(wr)
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    log_event(&conn, item_id, "applying", "needs_manual_review", "target_missing",
-                        &format!("追加目标文件不存在: {}", normalized_target));
+                    // v0.2.3: Auto-convert append_section → create_page when target missing
+                    log::info!("[review] append_section auto-converted to create_page: target not found at {}", normalized_target);
                     conn.execute(
-                        "UPDATE review_items SET status = 'needs_manual_review', apply_error = ?1, updated_at = ?2 WHERE id = ?3",
-                        rusqlite::params![format!("目标页面「{}」不存在，请确认是否转为创建页面", normalized_target), now_ts, item_id],
-                    ).map_err(|e| format!("更新审阅项状态失败: {}", e))?;
-                    return Ok(serde_json::json!({
-                        "status": "needs_manual_review",
-                        "message": format!("目标页面「{}」不存在，是否转为创建页面？", normalized_target),
-                        "missing_target": true,
-                    }));
+                        "UPDATE review_items SET auto_converted_from_update = 1 WHERE id = ?1",
+                        rusqlite::params![item_id],
+                    ).ok();
+                    let title = crate::wiki::markdown_indexer::MarkdownIndexer::best_title(
+                        &new_content, &normalized_target, Some(&stored_title),
+                    );
+                    let page_type = if stored_page_type.trim().is_empty() {
+                        PathService::path_to_page_type(&normalized_target).to_string()
+                    } else { stored_page_type };
+                    let canonical = PathService::generate_safe_name(&title);
+                    let wr = writer.create_page_full(
+                        kb_id, &wiki_dir, &page_type, &title, &canonical,
+                        &new_content, "", "[]", &task_id,
+                        if source_id.is_empty() { None } else { Some(source_id.as_str()) },
+                    ).map_err(|e| format!("自动转换为创建页面失败: {}", e))?;
+                    conn.execute(
+                        "UPDATE review_items SET target_path = ?1, title = ?2, page_type = ?3 WHERE id = ?4",
+                        rusqlite::params![wr.relative_path, title, page_type, item_id],
+                    ).map_err(|e| format!("更新审阅项路径失败: {}", e))?;
+                    Ok::<crate::wiki::wiki_writer::WikiWriteResult, String>(wr)
                 }
                 Err(e) => return Err(format!("读取目标页面失败 ({}): {}", normalized_target, e)),
-            };
-            let combined = format!("{}\n\n{}", existing, new_content);
-            writer.update_page_full(kb_id, &wiki_dir, &normalized_target, &combined, &task_id)?
+            }?;
+            Ok(wr)
         }
         "add_alias" => {
             let alias = new_content.trim().trim_matches('"').to_string();
@@ -369,16 +402,15 @@ fn apply_review_item_impl(
                 |row| row.get(0),
             ).map_err(|_| format!("未找到目标知识项: {}", normalized_target))?;
             crate::wiki::wiki_writer::WikiWriter::upsert_alias(&kernel.db, &item_id_found, &alias, "unknown")?;
-            crate::wiki::wiki_writer::WikiWriteResult {
+            Ok(crate::wiki::wiki_writer::WikiWriteResult {
                 page_id: String::new(),
                 relative_path: normalized_target.clone(),
                 content_hash: String::new(),
                 knowledge_item_id: Some(item_id_found),
                 operation_id: None,
-            }
+            })
         }
         "add_relation" => {
-            // v0.2.1: 尝试解析和写入关系
             let parsed: Result<serde_json::Value, _> = serde_json::from_str(&new_content);
             if let Ok(rel_json) = parsed {
                 if let (Some(source), Some(target)) = (
@@ -411,35 +443,32 @@ fn apply_review_item_impl(
                     }
                 }
             }
-            // 关系操作不产生 Wiki 页面
-            crate::wiki::wiki_writer::WikiWriteResult {
+            Ok(crate::wiki::wiki_writer::WikiWriteResult {
                 page_id: String::new(),
                 relative_path: String::new(),
                 content_hash: String::new(),
                 knowledge_item_id: None,
                 operation_id: None,
-            }
+            })
         }
         "merge_suggestion" => {
-            // v0.2.1: 合并建议 → 必须人工处理
-            log_event(&conn, item_id, "applying", "needs_manual_review", "merge_manual_required", "合并操作需要人工确认");
-            conn.execute(
-                "UPDATE review_items SET status = 'needs_manual_review', apply_error = ?1, updated_at = ?2 WHERE id = ?3",
-                rusqlite::params!["合并建议需要人工确认后再应用", now_ts, item_id],
-            ).map_err(|e| format!("更新审阅项状态失败: {}", e))?;
+            let msg = "合并建议需要人工确认后再应用";
+            ReviewEngine::set_item_status(
+                &conn, item_id, "applying", "needs_manual_review", msg,
+                "merge_manual_required", "合并操作需要人工确认", &now_ts,
+            ).map_err(|e| format!("设置 needs_manual_review 失败: {}", e))?;
             return Ok(serde_json::json!({
                 "status": "needs_manual_review",
-                "message": "合并建议需要人工确认后再应用",
-            "manual_required": true,
+                "message": msg,
+                "manual_required": true,
             }));
         }
         "skip" => {
-            // v0.2.1: 确认跳过
-            log_event(&conn, item_id, "applying", "skipped", "skip_confirmed", "用户确认跳过该项");
-            conn.execute(
-                "UPDATE review_items SET status = 'skipped', apply_error = '用户确认跳过', updated_at = ?1 WHERE id = ?2",
-                rusqlite::params![now_ts, item_id],
-            ).map_err(|e| format!("更新审阅项状态失败: {}", e))?;
+            let msg = "用户确认跳过";
+            ReviewEngine::set_item_status(
+                &conn, item_id, "applying", "skipped", msg,
+                "skip_confirmed", "用户确认跳过该项", &now_ts,
+            ).map_err(|e| format!("设置 skipped 失败: {}", e))?;
             return Ok(serde_json::json!({
                 "status": "skipped",
                 "message": "已确认跳过该项"
@@ -451,18 +480,18 @@ fn apply_review_item_impl(
             }
             let target_abs = PathService::resolve_workspace_path(&workspace_root, &normalized_target);
             if !target_abs.exists() {
-                log_event(&conn, item_id, "applying", "skipped", "delete_missing_target",
-                    &format!("删除目标不存在: {}", normalized_target));
-                conn.execute(
-                    "UPDATE review_items SET status = 'skipped', apply_error = ?1, updated_at = ?2 WHERE id = ?3",
-                    rusqlite::params![format!("目标页面「{}」不存在，已跳过删除", normalized_target), now_ts, item_id],
-                ).map_err(|e| format!("更新审阅项状态失败: {}", e))?;
+                let skip_msg = format!("目标页面「{}」不存在，已跳过删除", normalized_target);
+                ReviewEngine::set_item_status(
+                    &conn, item_id, "applying", "skipped", &skip_msg,
+                    "delete_missing_target",
+                    &format!("删除目标不存在: {}", normalized_target), &now_ts,
+                ).map_err(|e| format!("设置 skipped 失败: {}", e))?;
                 return Ok(serde_json::json!({
                     "status": "skipped",
-                    "message": format!("目标页面「{}」不存在，已跳过删除", normalized_target),
+                    "message": skip_msg,
                 }));
             }
-            // 级联清理：查关联的 knowledge_items
+            // 级联清理
             {
                 let mut stmt = conn.prepare(
                     "SELECT id FROM knowledge_items WHERE kb_id = ?1 AND (page_path = ?2 OR linked_page_path = ?2)"
@@ -490,71 +519,25 @@ fn apply_review_item_impl(
                         "DELETE FROM knowledge_items WHERE kb_id = ?1 AND (page_path = ?2 OR linked_page_path = ?2)",
                         rusqlite::params![kb_id, normalized_target],
                     ) {
-                        log::error!("[review] delete_page 删除 knowledge_items 失败(page={}): {}", normalized_target, e);
+                        log::error!("[review] delete_page 删除 knowledge_items 失败: {}", e);
                     }
                 }
             }
-
-            // 清理 graph_nodes 中引用此页面路径的节点
-            {
-                let mut edge_stmt = conn.prepare(
-                    "SELECT id FROM graph_edges WHERE kb_id = ?1 AND (source_node_id IN (SELECT id FROM graph_nodes WHERE kb_id = ?1 AND path = ?2) OR target_node_id IN (SELECT id FROM graph_nodes WHERE kb_id = ?1 AND path = ?2))"
-                ).map_err(|e| format!("查询关联图谱边失败: {}", e))?;
-                let edge_ids: Vec<String> = edge_stmt.query_map(
-                    rusqlite::params![kb_id, normalized_target],
-                    |row| row.get(0),
-                ).map_err(|e| format!("查询关联图谱边失败: {}", e))?
-                    .filter_map(|r| r.ok())
-                    .collect();
-                for edge_id in &edge_ids {
-                    if let Err(e) = conn.execute("DELETE FROM graph_edges WHERE id = ?1", rusqlite::params![edge_id]) {
-                        log::error!("[review] delete_page 删除 graph_edge 失败(edge={}): {}", edge_id, e);
-                    }
-                }
-                if let Err(e) = conn.execute(
-                    "DELETE FROM graph_nodes WHERE kb_id = ?1 AND path = ?2",
-                    rusqlite::params![kb_id, normalized_target],
-                ) {
-                    log::error!("[review] delete_page 删除 graph_nodes 失败(page={}): {}", normalized_target, e);
-                }
-            }
-
-            // 清理版本快照
+            // 删除 wiki_pages 记录
             if let Err(e) = conn.execute(
-                "DELETE FROM versions WHERE kb_id = ?1 AND page_path = ?2",
-                rusqlite::params![kb_id, normalized_target],
-            ) {
-                log::error!("[review] delete_page 删除 versions 失败(page={}): {}", normalized_target, e);
-            }
-
-            // 清理引用此页面的审阅事件 (review_item_events)
-            if let Err(e) = conn.execute(
-                "DELETE FROM review_item_events WHERE review_item_id IN (SELECT id FROM review_items WHERE review_id IN (SELECT id FROM reviews WHERE kb_id = ?1) AND target_path = ?2)",
-                rusqlite::params![kb_id, normalized_target],
-            ) {
-                log::error!("[review] delete_page 清理 review_item_events 失败(page={}): {}", normalized_target, e);
-            }
-
-            // 清理引用此页面的审阅项
-            if let Err(e) = conn.execute(
-                "DELETE FROM review_items WHERE review_id IN (SELECT id FROM reviews WHERE kb_id = ?1) AND target_path = ?2",
-                rusqlite::params![kb_id, normalized_target],
-            ) {
-                log::error!("[review] delete_page 清理 review_items 失败(page={}): {}", normalized_target, e);
-            }
-
-            // 先删除 DB 记录，确保数据库一致性
-            conn.execute(
                 "DELETE FROM wiki_pages WHERE kb_id = ?1 AND path = ?2",
                 rusqlite::params![kb_id, normalized_target],
-            ).map_err(|e| format!("删除页面记录失败: {}", e))?;
-            // 再删除磁盘文件（如果失败仅记录日志，数据库已保持一致性）
-            if let Err(e) = std::fs::remove_file(&target_abs) {
-                log::error!("[review] delete_page 删除页面文件失败 ({}): {}", target_abs.display(), e);
+            ) {
+                log::error!("[review] delete_page 删除 wiki_pages 失败: {}", e);
             }
-            // 记录操作
+            // 删除文件
+            if target_abs.exists() {
+                if let Err(e) = std::fs::remove_file(&target_abs) {
+                    log::error!("[review] delete_page 删除文件失败 ({}): {}", normalized_target, e);
+                }
+            }
             let op_id = uuid::Uuid::new_v4().to_string();
-            let op_hash = PathService::content_hash(&format!("delete:{}:{}", normalized_target, now_ts));
+            let op_hash = PathService::content_hash(&format!("delete:{}", normalized_target));
             if let Err(e) = conn.execute(
                 "INSERT INTO operations (id, kb_id, task_id, operation_hash, target_path, status, applied_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, 'applied', ?6)",
@@ -562,28 +545,27 @@ fn apply_review_item_impl(
             ) {
                 log::error!("[review] 记录 delete_page operation 失败: {}", e);
             }
-            crate::wiki::wiki_writer::WikiWriteResult {
+            Ok(crate::wiki::wiki_writer::WikiWriteResult {
                 page_id: String::new(),
                 relative_path: normalized_target.clone(),
                 content_hash: String::new(),
                 knowledge_item_id: None,
                 operation_id: Some(op_id),
-            }
+            })
         }
         "unresolved" | "invalid" => {
-            // v0.2.1: 不可自动应用
-            log_event(&conn, item_id, "applying", "needs_manual_review", "unresolved", "该项标记为未解决/无效");
-            conn.execute(
-                "UPDATE review_items SET status = 'needs_manual_review', apply_error = ?1, updated_at = ?2 WHERE id = ?3",
-                rusqlite::params!["该项需要人工评估和处理", now_ts, item_id],
-            ).map_err(|e| format!("更新审阅项状态失败: {}", e))?;
+            let msg = "该项需要人工评估和处理";
+            ReviewEngine::set_item_status(
+                &conn, item_id, "applying", "needs_manual_review", msg,
+                "unresolved", "该项标记为未解决/无效", &now_ts,
+            ).map_err(|e| format!("设置 needs_manual_review 失败: {}", e))?;
             return Ok(serde_json::json!({
                 "status": "needs_manual_review",
-                "message": "该项需要人工评估和处理"
+                "message": msg
             }));
         }
         other => return Err(format!("未知操作类型: {}", other)),
-    };
+    }?;
 
     // 后处理：重建索引、日志、版本快照、图谱同步
     crate::wiki::index_service::IndexService::new(kernel.db.clone())
@@ -619,17 +601,15 @@ fn apply_review_item_impl(
     }
 
     crate::graph::graph_service::GraphService::sync_from_knowledge_items(&kernel.db, kb_id)?;
-    // 自动推导关系（knowledge_items → wiki_pages 的 references 关联 + same_source 共现关联）
     if let Err(e) = crate::graph::graph_service::GraphService::derive_relationships(&kernel.db, kb_id) {
         log::error!("[review] derive_relationships 失败 (kb={}): {}", kb_id, e);
     }
 
-    // v0.2.1: 成功 → status = applied（不允许变成 skipped）
-    log_event(&conn, item_id, "applying", "applied", "apply_success", "操作成功应用");
-    conn.execute(
-        "UPDATE review_items SET status = 'applied', apply_error = '', updated_at = ?1 WHERE id = ?2",
-        rusqlite::params![now_ts, item_id],
-    ).map_err(|e| format!("更新审阅项状态失败: {}", e))?;
+    // v0.2.3: 成功 → status = applied
+    ReviewEngine::set_item_status(
+        &conn, item_id, "applying", "applied", "",
+        "apply_success", "操作成功应用", &now_ts,
+    ).map_err(|e| format!("设置 applied 状态失败: {}", e))?;
 
     let pending_count: i64 = match conn.query_row(
         "SELECT COUNT(*) FROM review_items WHERE review_id = ?1 AND status IN ('pending', 'pending_manual', 'needs_manual_review', 'apply_failed', 'applying')",
@@ -843,15 +823,28 @@ pub async fn reject_all_review(
         )
         .map_err(|_| "未找到待处理的审阅".to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
+
+    // Transactional: both updates succeed together or neither does
+    conn.execute("BEGIN", []).map_err(|e| format!("开始事务失败: {}", e))?;
+
+    if let Err(e) = conn.execute(
         "UPDATE review_items SET status = 'rejected', updated_at = ?1 WHERE review_id = ?2 AND status = 'pending'",
         rusqlite::params![now, review_id],
-    ).map_err(|e| format!("拒绝审阅失败: {}", e))?;
+    ) {
+        conn.execute("ROLLBACK", []).ok();
+        return Err(format!("拒绝审阅失败: {}", e));
+    }
 
-    conn.execute(
+    if let Err(e) = conn.execute(
         "UPDATE reviews SET status = 'rejected', updated_at = ?1 WHERE id = ?2",
         rusqlite::params![now, review_id],
-    ).map_err(|e| format!("更新审阅状态失败: {}", e))?;
+    ) {
+        conn.execute("ROLLBACK", []).ok();
+        return Err(format!("更新审阅状态失败: {}", e));
+    }
+
+    conn.execute("COMMIT", []).map_err(|e| format!("提交事务失败: {}", e))?;
+
 
     let task_id: String = match conn.query_row(
         "SELECT task_id FROM reviews WHERE id = ?1", rusqlite::params![review_id], |row| row.get(0),

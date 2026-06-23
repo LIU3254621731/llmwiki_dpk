@@ -33,9 +33,24 @@ pub struct DuplicatePageGroup {
     pub match_type: String,
 }
 
-pub struct DedupService;
+/// Simplified candidate for find_duplicates (v0.2.3)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DuplicateCandidate {
+    pub id: String,
+    pub title: String,
+    pub path: String,
+    pub similarity_score: f64,
+}
+
+pub struct DedupService {
+    pub db: Arc<DatabaseService>,
+}
 
 impl DedupService {
+    pub fn new(db: Arc<DatabaseService>) -> Self {
+        Self { db }
+    }
+
     /// 规范化名称 (去除空格、全角半角统一、英文小写、去除多余连字符)
     pub fn normalize_name(name: &str) -> String {
         let mut s = name.trim().to_string();
@@ -507,6 +522,188 @@ impl DedupService {
             Err(e) => return Err(format!("查询 canonical 是否存在失败: {}", e)),
         };
         Ok(result)
+    }
+
+
+    // ============================================================
+    // v0.2.3: Instance-based dedup methods using strsim
+    // ============================================================
+
+    /// Find duplicate candidates by title and page_type using strsim::normalized_damerau_levenshtein.
+    /// Returns candidates with similarity_score >= 0.85.
+    pub fn find_duplicate_candidates(&self, kb_id: &str, title: &str, page_type: &str) -> Vec<DuplicateCandidate> {
+        let conn = match self.db.connect() {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("[dedup] find_duplicates DB connect failed: {}", e);
+                return Vec::new();
+            }
+        };
+
+        let norm_title = Self::normalize_name(title);
+
+        let mut stmt = match conn.prepare(
+            "SELECT id, title, path FROM wiki_pages WHERE kb_id = ?1 AND page_type = ?2"
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("[dedup] find_duplicates prepare failed: {}", e);
+                return Vec::new();
+            }
+        };
+
+        let pages: Vec<(String, String, String)> = match stmt
+            .query_map(rusqlite::params![kb_id, page_type], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            }) {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(e) => {
+                    log::error!("[dedup] find_duplicates query failed: {}", e);
+                    return Vec::new();
+                }
+            };
+
+        let threshold: f64 = 0.85;
+        let mut candidates: Vec<DuplicateCandidate> = Vec::new();
+
+        for (pid, ptitle, ppath) in &pages {
+            let norm_ptitle = Self::normalize_name(ptitle);
+            let sim = strsim::normalized_damerau_levenshtein(&norm_title, &norm_ptitle);
+            if sim >= threshold {
+                candidates.push(DuplicateCandidate {
+                    id: pid.clone(),
+                    title: ptitle.clone(),
+                    path: ppath.clone(),
+                    similarity_score: (sim * 10000.0).round() / 10000.0,
+                });
+            }
+        }
+
+        // Also check against all pages if page_type filter yields nothing
+        if candidates.is_empty() {
+            let mut all_stmt = match conn.prepare(
+                "SELECT id, title, path FROM wiki_pages WHERE kb_id = ?1"
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("[dedup] find_duplicates all prepare failed: {}", e);
+                    return Vec::new();
+                }
+            };
+
+            let all_pages: Vec<(String, String, String)> = match all_stmt
+                .query_map(rusqlite::params![kb_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                }) {
+                    Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                    Err(e) => {
+                        log::error!("[dedup] find_duplicates all query failed: {}", e);
+                        return Vec::new();
+                    }
+                };
+
+            for (pid, ptitle, ppath) in &all_pages {
+                let norm_ptitle = Self::normalize_name(ptitle);
+                let sim = strsim::normalized_damerau_levenshtein(&norm_title, &norm_ptitle);
+                if sim >= threshold {
+                    candidates.push(DuplicateCandidate {
+                        id: pid.clone(),
+                        title: ptitle.clone(),
+                        path: ppath.clone(),
+                        similarity_score: (sim * 10000.0).round() / 10000.0,
+                    });
+                }
+            }
+        }
+
+        candidates.sort_by(|a, b| b.similarity_score.partial_cmp(&a.similarity_score).unwrap_or(std::cmp::Ordering::Equal));
+        candidates
+    }
+
+    /// Batch scan all pages and flag duplicates using strsim::normalized_damerau_levenshtein.
+    /// Groups pages of the same page_type that exceed the similarity threshold.
+    pub fn dedup_cleanup(&self, kb_id: &str) -> Result<Vec<DuplicatePageGroup>, String> {
+        let conn = self.db.connect()?;
+        let threshold: f64 = 0.85;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, title, canonical_name, path, page_type FROM wiki_pages WHERE kb_id = ?1 ORDER BY page_type, title"
+        ).map_err(|e| format!("dedup_cleanup query failed: {}", e))?;
+
+        let pages: Vec<(String, String, String, String, String)> = stmt
+            .query_map(rusqlite::params![kb_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+            })
+            .map_err(|e| format!("dedup_cleanup map failed: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("dedup_cleanup collect failed: {}", e))?;
+
+        let mut groups: Vec<DuplicatePageGroup> = Vec::new();
+        let mut processed = std::collections::HashSet::new();
+        let n = pages.len();
+
+        for i in 0..n {
+            if processed.contains(&pages[i].0) { continue; }
+            let (ref pid, ref ptitle, ref pcanonical, ref ppath, ref ptype) = pages[i];
+            let norm1 = Self::normalize_name(ptitle);
+
+            let mut group_ids = vec![pid.clone()];
+            let mut group_titles = vec![ptitle.clone()];
+            let mut group_paths = vec![ppath.clone()];
+            let mut best_match_type = String::new();
+
+            for j in (i + 1)..n {
+                if processed.contains(&pages[j].0) { continue; }
+                if &pages[j].4 != ptype { continue; }
+
+                let (ref pid2, ref ptitle2, ref pcanonical2, ref ppath2, _) = pages[j];
+                let norm2 = Self::normalize_name(ptitle2);
+
+                // Exact match
+                if ptitle == ptitle2 {
+                    if best_match_type.is_empty() { best_match_type = "exact".into(); }
+                    group_ids.push(pid2.clone());
+                    group_titles.push(ptitle2.clone());
+                    group_paths.push(ppath2.clone());
+                    processed.insert(pid2.clone());
+                    continue;
+                }
+
+                // Canonical match
+                if pcanonical == pcanonical2 && !pcanonical.is_empty() {
+                    if best_match_type.is_empty() { best_match_type = "canonical".into(); }
+                    group_ids.push(pid2.clone());
+                    group_titles.push(ptitle2.clone());
+                    group_paths.push(ppath2.clone());
+                    processed.insert(pid2.clone());
+                    continue;
+                }
+
+                // strsim fuzzy match
+                let sim = strsim::normalized_damerau_levenshtein(&norm1, &norm2);
+                if sim >= threshold {
+                    if best_match_type.is_empty() { best_match_type = format!("fuzzy_{:.2}", sim); }
+                    group_ids.push(pid2.clone());
+                    group_titles.push(ptitle2.clone());
+                    group_paths.push(ppath2.clone());
+                    processed.insert(pid2.clone());
+                }
+            }
+
+            if group_ids.len() > 1 {
+                processed.insert(pid.clone());
+                groups.push(DuplicatePageGroup {
+                    canonical_name: pcanonical.clone(),
+                    normalized_name: norm1,
+                    page_ids: group_ids,
+                    page_titles: group_titles,
+                    page_paths: group_paths,
+                    match_type: if best_match_type.is_empty() { "fuzzy".into() } else { best_match_type },
+                });
+            }
+        }
+
+        Ok(groups)
     }
 }
 

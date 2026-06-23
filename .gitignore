@@ -1,4 +1,4 @@
-node_modules
+﻿node_modules
 dist/
 src-tauri/target/
 *.swp
@@ -9,3 +9,16 @@ Thumbs.db
 .env
 .env.local
 .claude/
+
+# Large external dependencies
+models/
+markitdown-main/
+markitdown-main.zip
+open-webui-main/
+open-webui-main.zip
+ui.zip
+mnt/
+
+# Temporary/patches
+*.diff
+__pycache__/

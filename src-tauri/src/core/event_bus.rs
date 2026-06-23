@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Emitter};
+﻿use tauri::{AppHandle, Emitter};
 use serde::Serialize;
 
 pub struct EventBus {
@@ -36,6 +36,28 @@ impl EventBus {
         });
         if let Err(e) = self.app.emit("task-event", payload) {
             log::error!("[EventBus] emit task-event 失败: {}", e);
+        }
+    }
+
+    /// 发送任务进度事件 — 供 TaskProgressTray 实时展示流水线进度
+    pub fn emit_task_progress(
+        &self,
+        task_id: &str,
+        stage: &str,
+        progress: f64,
+        current_file: &str,
+        message: &str,
+    ) {
+        let payload = serde_json::json!({
+            "task_id": task_id,
+            "stage": stage,
+            "progress": progress,
+            "current_file": current_file,
+            "message": message,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        });
+        if let Err(e) = self.app.emit("task-progress", payload) {
+            log::error!("[EventBus] emit task-progress 失败: {}", e);
         }
     }
 

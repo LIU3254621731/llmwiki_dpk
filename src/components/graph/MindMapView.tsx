@@ -15,8 +15,8 @@ import HierarchicalNode from "./HierarchicalNode";
 
 // ── Color palette (for MiniMap node coloring) ──
 const NODE_COLORS: Record<string, string> = {
-  entity:  "#34d399", concept: "#fbbf24", topic:   "#a78bfa",
-  person:  "#22d3ee", source:   "#fb923c", question:"#fda4af",
+  entity:  "#3b82f6", concept: "#22c55e", topic:   "#a78bfa",
+  person:  "#22d3ee", source:   "#6b7280", question:"#fda4af",
   wikipage:"#818cf8", review:   "#c084fc", dataset: "#6ee7b7",
   method:  "#a78bfa",
   default: "#cbd5e1",
@@ -39,7 +39,7 @@ export default function MindMapView({
   onNodeClick,
   direction = "TB",
 }: MindMapViewProps) {
-  // Convert domain data → ReactFlow nodes/edges
+  // Convert domain data �?ReactFlow nodes/edges
   const { rfNodes, rfEdges } = useMemo(() => {
     const ns: Node[] = nodes.map((n) => ({
       id: n.id,
@@ -71,6 +71,10 @@ export default function MindMapView({
         height: 16,
         color: e.relation === "contradicts" ? "#ef4444" : "#94a3b8",
       },
+      label: e.relation,
+      labelStyle: { fill: "#64748b", fontSize: 10, fontWeight: 500 },
+      labelBgStyle: { fill: "rgba(255,255,255,0.85)", rx: 4, ry: 4 },
+      labelBgPadding: [6, 3] as [number, number],
       style: {
         stroke: e.relation === "contradicts" ? "#ef4444" : "#94a3b8",
         strokeWidth: e.confidence === "high" ? 2 : 1,

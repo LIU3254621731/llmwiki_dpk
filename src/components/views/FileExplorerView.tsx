@@ -5,6 +5,7 @@ import { useFileTreeStore, type FileTreeNode } from "@/stores/useFileTreeStore";
 import {
   Folder, FolderOpen, File, FileText,
   ChevronRight, ChevronDown, RefreshCw, ExternalLink,
+  FileUp, Upload,
 } from "lucide-react";
 
 function nodePath(n: FileTreeNode): string {
@@ -46,19 +47,41 @@ export default function FileExplorerView() {
     });
   }, []);
 
+  const handleUpload = () => {
+    window.dispatchEvent(new CustomEvent("trigger-file-upload"));
+  };
+
   return (
     <div className="h-full flex overflow-hidden">
       {/* Left: File tree */}
       <div className="w-[300px] shrink-0 border-r border-border flex flex-col overflow-hidden bg-sidebar-bg">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">鏂囦欢娴忚</h3>
-          <button onClick={() => currentKB && loadFileTree(currentKB.id, currentKB.path)} className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors" title="鍒锋柊">
+          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">文件浏览</h3>
+          <button onClick={() => currentKB && loadFileTree(currentKB.id, currentKB.path)} className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors" title="刷新">
             <RefreshCw size={13} />
           </button>
         </div>
         <div className="flex-1 overflow-y-auto py-1">
           {files.length === 0 ? (
-            <div className="text-xs text-muted-foreground text-center py-8">鏆傛棤鏂囦欢</div>
+            <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+              <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
+                <FileUp size={24} className="text-slate-300 dark:text-slate-600" />
+              </div>
+              <p className="text-sm text-slate-400 dark:text-slate-500 mb-1">
+                暂无已导入文件
+              </p>
+              <p className="text-xs text-slate-400/60 mb-5 max-w-[220px]">
+                点击上传按钮添加文档到您的知识库。
+              </p>
+              <button
+                type="button"
+                onClick={handleUpload}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-800 rounded text-xs font-medium hover:bg-slate-700 dark:hover:bg-slate-300 transition-colors"
+              >
+                <Upload size={13} />
+                上传文档
+              </button>
+            </div>
           ) : (
             <TreeList
               nodes={files}
@@ -76,7 +99,7 @@ export default function FileExplorerView() {
       <div className="flex-1 flex items-center justify-center bg-background">
         <div className="text-center">
           <ExternalLink size={40} className="mx-auto mb-3 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">鐐瑰嚮宸︿晶鏂囦欢鍦ㄦ柊鏍囩椤典腑鎵撳紑</p>
+          <p className="text-sm text-muted-foreground">点击左侧文件在新标签页中打开</p>
         </div>
       </div>
     </div>

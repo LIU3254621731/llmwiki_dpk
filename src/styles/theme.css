@@ -1,8 +1,7 @@
-/* ═══════════════════════════════════════════════════════
-   LLMWiki Theme Tokens — VSCode-inspired light/dark
+/* ══════════════════════════════════════════════════════�?   LLMWiki Theme Tokens �?VSCode-inspired light/dark
    All components reference these variables exclusively.
    Changing a variable here affects the entire UI.
-   ═══════════════════════════════════════════════════════ */
+   ══════════════════════════════════════════════════════�?*/
 
 /* ── Dark theme (default) ── */
 :root {
@@ -81,7 +80,14 @@
   --sidebar-width: 60px;
   --chatsidebar-width: 350px;
   --statusbar-height: 32px;
-}
+
+
+  /* Spacing scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;}
 
 /* ── Light theme ── */
 html:not(.dark) {
@@ -143,6 +149,13 @@ html:not(.dark) {
 
   --ring: #7c3aed;
   --radius: 0.5rem;
+
+  /* Spacing scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
 }
 
 html {

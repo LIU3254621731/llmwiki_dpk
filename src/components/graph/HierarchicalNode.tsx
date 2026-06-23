@@ -1,12 +1,11 @@
 import { Handle, Position, type NodeProps } from "reactflow";
 
-// ── Color palette by node type ──
 const PALETTE: Record<string, { bg: string; border: string; text: string }> = {
-  entity:   { bg: "#ecfdf5", border: "#34d399", text: "#065f46" },
-  concept:  { bg: "#fffbeb", border: "#fbbf24", text: "#92400e" },
+  entity:   { bg: "#eff6ff", border: "#3b82f6", text: "#1e40af" },
+  concept:  { bg: "#f0fdf4", border: "#22c55e", text: "#166534" },
   topic:    { bg: "#f5f3ff", border: "#a78bfa", text: "#5b21b6" },
   person:   { bg: "#ecfeff", border: "#22d3ee", text: "#155e75" },
-  source:   { bg: "#fff7ed", border: "#fb923c", text: "#9a3412" },
+  source:   { bg: "#f9fafb", border: "#6b7280", text: "#374151" },
   question: { bg: "#fff1f2", border: "#fda4af", text: "#9f1239" },
   wikipage: { bg: "#eef2ff", border: "#818cf8", text: "#3730a3" },
   review:   { bg: "#faf5ff", border: "#c084fc", text: "#6b21a8" },
@@ -16,9 +15,9 @@ const PALETTE: Record<string, { bg: string; border: string; text: string }> = {
 };
 
 const TYPE_LABELS: Record<string, string> = {
-  entity: "实体", concept: "概念", topic: "主题", person: "人物",
-  source: "来源", wikipage: "Wiki", question: "问题", dataset: "数据集",
-  method: "方法", review: "审阅",
+  entity: "entity", concept: "concept", topic: "topic", person: "person",
+  source: "source", wikipage: "Wiki", question: "question", dataset: "dataset",
+  method: "method", review: "review",
 };
 
 function truncate(text: string, maxLen = 8): string {
@@ -26,7 +25,6 @@ function truncate(text: string, maxLen = 8): string {
   return text.slice(0, maxLen) + "...";
 }
 
-/** A polished hierarchical node for the knowledge graph. */
 export default function HierarchicalNode({ data, selected }: NodeProps) {
   const colors = PALETTE[data.nodeType] || PALETTE.default;
   const label: string = data.label || "?";
@@ -40,7 +38,6 @@ export default function HierarchicalNode({ data, selected }: NodeProps) {
       title={label}
       style={{ minWidth: 90 }}
     >
-      {/* ── Badges ── */}
       {needsReview && (
         <span
           className="absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full z-10 animate-pulse"
@@ -59,8 +56,6 @@ export default function HierarchicalNode({ data, selected }: NodeProps) {
           }}
         />
       )}
-
-      {/* ── Card body ── */}
       <div
         style={{
           background: `linear-gradient(135deg, ${colors.bg} 0%, #fff 100%)`,
@@ -73,15 +68,12 @@ export default function HierarchicalNode({ data, selected }: NodeProps) {
           transition: "box-shadow 0.15s, border-color 0.15s",
         }}
       >
-        {/* Handles */}
         <Handle
           type="target"
           position={Position.Top}
           style={{ background: colors.border, width: 8, height: 8, border: "2px solid white" }}
         />
-
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Type dot */}
           <span
             style={{
               width: 8,
@@ -91,8 +83,6 @@ export default function HierarchicalNode({ data, selected }: NodeProps) {
               background: colors.border,
             }}
           />
-
-          {/* Label */}
           <span
             style={{
               fontSize: 12,
@@ -108,8 +98,6 @@ export default function HierarchicalNode({ data, selected }: NodeProps) {
             {displayLabel}
           </span>
         </div>
-
-        {/* Type tag + wiki indicator */}
         <div
           style={{
             fontSize: 9,
@@ -125,7 +113,6 @@ export default function HierarchicalNode({ data, selected }: NodeProps) {
             <span style={{ color: "#22c55e", fontWeight: 600 }}>W</span>
           )}
         </div>
-
         <Handle
           type="source"
           position={Position.Bottom}

@@ -22,7 +22,7 @@ body {
   height: 100vh;
 }
 
-/* Scrollbar â€” dark theme */
+/* Scrollbar â€?dark theme */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -70,4 +70,24 @@ body {
 .view-exit-active {
   opacity: 0;
   transition: opacity 0.15s ease;
+}
+
+/* Fade-in animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.view-enter {
+  animation: fadeIn 200ms ease-in-out;
+}
+
+/* Card base style */
+.card {
+  @apply bg-white dark:bg-slate-800 shadow-sm rounded-lg border border-slate-200 dark:border-slate-700;
+}
+
+/* Empty state */
+.empty-state {
+  @apply flex flex-col items-center justify-center py-16 text-center text-slate-400;
 }

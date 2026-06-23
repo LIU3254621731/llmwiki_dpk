@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+﻿import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useKBStore } from "@/stores/useKBStore";
 import { useAppStore } from "@/stores/useAppStore";
 import { useEditorStore } from "@/stores/useEditorStore";
@@ -62,6 +62,49 @@ function parseThinkContent(text: string): {
   return { thinkContent: "", answerContent: text, hasCompleteThink: false };
 }
 
+// ---- Partial JSON answer extraction (for streaming) ----
+
+/**
+ * Extract the "answer" field value from a potentially partial JSON string.
+ * Handles the streaming case where the JSON is being built token-by-token.
+ * Returns null if no "answer" key is found.
+ */
+function extractAnswerFromPartialJson(text: string): string | null {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("{")) return null;
+
+  // Find "answer" key position
+  const keyMatch = text.match(/"answer"\s*:\s*"/);
+  if (!keyMatch || keyMatch.index === undefined) return null;
+
+  const valueStart = keyMatch.index + keyMatch[0].length;
+  let result = "";
+  let i = valueStart;
+  let closed = false;
+
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "\\" && i + 1 < text.length) {
+      const next = text[i + 1];
+      if (next === '"') { result += '"'; i += 2; }
+      else if (next === "n") { result += "\n"; i += 2; }
+      else if (next === "t") { result += "\t"; i += 2; }
+      else if (next === "r") { result += "\r"; i += 2; }
+      else if (next === "\\") { result += "\\"; i += 2; }
+      else { result += ch; i++; }
+    } else if (ch === '"') {
+      closed = true;
+      break;
+    } else {
+      result += ch;
+      i++;
+    }
+  }
+
+  if (closed || result.length > 0) return result;
+  return null;
+}
+
 // ---- ThinkBlock component ----
 
 function ThinkBlock({ content, streaming }: { content: string; streaming: boolean }) {
@@ -100,8 +143,14 @@ function AssistantBubble({
 
   // 尝试解析 JSON 响应，提取 answer 字段进行 Markdown 渲染
   const renderedContent = useMemo(() => {
-    if (isStreaming) return null; // 流式输出时不解析 JSON
     const text = answerContent || content;
+    // Try partial extraction during streaming
+    if (isStreaming) {
+      const partial = extractAnswerFromPartialJson(text);
+      if (partial) return partial;
+      return null; // Still building JSON structure
+    }
+    // Full parse when streaming is done
     try {
       const parsed = JSON.parse(text);
       if (parsed.answer) return parsed.answer;
@@ -453,11 +502,13 @@ export default function ChatSidebar() {
           (event) => {
             if (abortRef.current) return;
             streamingTextRef.current += event.payload.chunk;
+            // Try to extract "answer" from JSON during streaming
+            const displayText = extractAnswerFromPartialJson(streamingTextRef.current) ?? streamingTextRef.current;
             setMessages((prev) => {
               const updated = [...prev];
               const lastIdx = updated.length - 1;
               if (updated[lastIdx]?.role === "assistant") {
-                updated[lastIdx] = { ...updated[lastIdx], content: streamingTextRef.current };
+                updated[lastIdx] = { ...updated[lastIdx], content: displayText };
               }
               return updated;
             });

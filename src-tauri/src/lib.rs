@@ -108,6 +108,8 @@ pub fn run() {
             commands::review::reject_all_review,
             commands::review::delete_review_item,
             commands::review::regenerate_review,
+            // Dedup (v0.2.3)
+            commands::dedup::dedup_cleanup,
             // Wiki
             commands::wiki::list_wiki_pages,
             commands::wiki::get_wiki_page_content,

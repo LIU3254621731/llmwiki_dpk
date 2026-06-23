@@ -425,12 +425,8 @@ impl ReviewEngine {
         if ["skip", "merge_suggestion", "unresolved", "invalid"].contains(&operation_type.as_str()) {
             return Err(format!("无法通过 accept_item 处理 operation_type={}，请使用对应的审阅操作", operation_type));
         }
-        conn.execute(
-            "UPDATE review_items SET status = 'applied', updated_at = ?1 WHERE id = ?2",
-            rusqlite::params![now, item_id],
-        )
-        .map_err(|e| format!("接受审阅项失败: {}", e))?;
-        Self::log_item_event(&conn, item_id, &old_status, "applied", "accept_legacy", "通过废弃的 accept_item 接受（警告：绕过 operation_type 分发）", &now)?;
+        Self::set_item_status(&conn, item_id, &old_status, "applied", "", "accept_legacy", "通过废弃的 accept_item 接受（警告：绕过 operation_type 分发）", &now)?;
+
         Ok(())
     }
 
@@ -449,12 +445,8 @@ impl ReviewEngine {
             }
             Err(e) => return Err(format!("查询审阅项失败: {}", e)),
         };
-        conn.execute(
-            "UPDATE review_items SET status = 'rejected', updated_at = ?1 WHERE id = ?2",
-            rusqlite::params![now, item_id],
-        )
-        .map_err(|e| format!("拒绝审阅项失败: {}", e))?;
-        Self::log_item_event(&conn, item_id, &old_status, "rejected", "reject", "用户拒绝审阅项", &now)?;
+        Self::set_item_status(&conn, item_id, &old_status, "rejected", "", "reject", "用户拒绝审阅项", &now)?;
+
         Ok(())
     }
 
@@ -469,12 +461,60 @@ impl ReviewEngine {
         Ok(())
     }
 
+    /// Validate state transition according to strict state machine
+    /// Allowed transitions:
+    ///   pending → applying | needs_manual_review | rejected | skipped
+    ///   applying → applied | apply_failed
+    ///   needs_manual_review → applying | rejected | skipped
+    /// Terminal states (applied, apply_failed, rejected, skipped) cannot transition further
+    pub fn valid_transition(from: &str, to: &str) -> bool {
+        matches!(
+            (from, to),
+            ("pending", "applying")
+                | ("pending", "needs_manual_review")
+                | ("pending", "rejected")
+                | ("pending", "skipped")
+                | ("applying", "applied")
+                | ("applying", "apply_failed")
+                | ("needs_manual_review", "applying")
+                | ("needs_manual_review", "rejected")
+                | ("needs_manual_review", "skipped")
+        )
+    }
+
+    /// Set review item status with transition validation and event logging.
+    /// Returns Err with clear error message if transition is invalid.
+    pub fn set_item_status(
+        conn: &rusqlite::Connection,
+        item_id: &str,
+        old_status: &str,
+        new_status: &str,
+        apply_error: &str,
+        action: &str,
+        reason: &str,
+        now: &str,
+    ) -> Result<(), String> {
+        if !Self::valid_transition(old_status, new_status) {
+            return Err(format!(
+                "Invalid state transition: {} -> {} is not allowed for item {}",
+                old_status, new_status, item_id
+            ));
+        }
+        conn.execute(
+            "UPDATE review_items SET status = ?1, apply_error = ?2, updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![new_status, apply_error, now, item_id],
+        )
+        .map_err(|e| format!("Failed to update review item status to {}: {}", new_status, e))?;
+        Self::log_item_event(conn, item_id, old_status, new_status, action, reason, now)?;
+        Ok(())
+    }
+
     /// 接受所有低风险项
     pub fn accept_all_low_risk(db: &Arc<DatabaseService>, review_id: &str) -> Result<usize, String> {
         let conn = db.connect()?;
         let now = chrono::Utc::now().to_rfc3339();
         let count = conn.execute(
-            "UPDATE review_items SET status = 'accepted', updated_at = ?1 WHERE review_id = ?2 AND risk_level = 'low' AND status = 'pending'",
+            "UPDATE review_items SET status = 'applied', updated_at = ?1 WHERE review_id = ?2 AND risk_level = 'low' AND status = 'pending'",
             rusqlite::params![now, review_id],
         )
         .map_err(|e| format!("接受低风险项失败: {}", e))?;

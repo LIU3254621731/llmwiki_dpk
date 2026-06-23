@@ -1,0 +1,139 @@
+{
+    "meta":  {
+                 "version":  "0.1.0",
+                 "created":  "2026-06-23",
+                 "system":  "LLMWiki Dev-Agents 鈥?LangGraph Multi-Agent Development Framework",
+                 "target_project":  "E:\\Code\\llmwiki_dpk"
+             },
+    "agents":  [
+                   {
+                       "id":  "agent-alpha",
+                       "name":  "ReviewAgent",
+                       "owner":  "Rust Backend",
+                       "status":  "done",
+                       "priority":  1,
+                       "description":  "Fix review state machine: strict status transitions, create/update discrimination, atomic writes",
+                       "files":  [
+                                     "src-tauri/src/review/review_engine.rs",
+                                     "src-tauri/src/commands/review.rs"
+                                 ],
+                       "acceptance":  [
+                                          "create_page 鈫?accept 鈫?status = applied (never silently skipped)",
+                                          "update_page with missing target 鈫?error or auto-convert to create_page",
+                                          "Batch accept/reject works atomically with rollback on failure",
+                                          "Apply failures expose specific error messages in UI"
+                                      ]
+                   },
+                   {
+                       "id":  "agent-beta",
+                       "name":  "GraphAgent",
+                       "owner":  "React Frontend",
+                       "status":  "done",
+                       "priority":  2,
+                       "description":  "Fix blank knowledge graph canvas: render nodes/edges, empty state guidance",
+                       "files":  [
+                                     "src/components/graph/MindMapView.tsx",
+                                     "src/components/views/CanvasView.tsx"
+                                 ],
+                       "acceptance":  [
+                                          "Graph canvas renders nodes when data exists (even orphan nodes)",
+                                          "Edges render between related nodes with labels",
+                                          "Empty state shows actionable next-step guidance",
+                                          "Node click navigates to related wiki page"
+                                      ]
+                   },
+                   {
+                       "id":  "agent-gamma",
+                       "name":  "UIAgent",
+                       "owner":  "CSS/React",
+                       "status":  "done",
+                       "priority":  3,
+                       "description":  "Polish Tailwind theme, add transitions, fix empty state guidance across all views",
+                       "files":  [
+                                     "src/styles/theme.css",
+                                     "src/index.css",
+                                     "src/components/views/DashboardView.tsx",
+                                     "src/components/views/FileExplorerView.tsx",
+                                     "src/components/layout/StatusBar.tsx"
+                                 ],
+                       "acceptance":  [
+                                          "Consistent spacing/padding across all views",
+                                          "Smooth transitions on view switching (200ms)",
+                                          "Each empty view shows actionable next step",
+                                          "Dark/light mode colors consistent"
+                                      ]
+                   },
+                   {
+                       "id":  "agent-delta",
+                       "name":  "DedupAgent",
+                       "owner":  "Rust Backend",
+                       "status":  "done",
+                       "priority":  4,
+                       "description":  "Wire dedup_service into wiki update pipeline, prevent duplicate entities/concepts",
+                       "files":  [
+                                     "src-tauri/src/dedup/dedup_service.rs",
+                                     "src-tauri/src/agents/wiki_update.rs"
+                                 ],
+                       "acceptance":  [
+                                          "Wiki update checks for duplicates before creating pages",
+                                          "Duplicate entities show merge suggestion in review",
+                                          "Dedup uses strsim fuzzy matching with configurable threshold"
+                                      ]
+                   },
+                   {
+                       "id":  "agent-epsilon",
+                       "name":  "FileTreeAgent",
+                       "owner":  "React Frontend",
+                       "status":  "done",
+                       "priority":  5,
+                       "description":  "Add right-click context menu, keyboard navigation, real-time search filter",
+                       "files":  [
+                                     "src/components/filebrowser/FileTree.tsx",
+                                     "src/components/filebrowser/FileTreeHeader.tsx"
+                                 ],
+                       "acceptance":  [
+                                          "Right-click: Open / View AI Log / Copy Path / Show in Explorer / Delete",
+                                          "Arrow keys navigate tree nodes",
+                                          "Enter opens file in editor",
+                                          "Search input filters tree in real-time with highlighting"
+                                      ]
+                   }
+               ],
+    "phases":  [
+                   {
+                       "phase":  1,
+                       "name":  "鍩虹璁炬柦鎼缓",
+                       "agents":  [
+
+                                  ],
+                       "status":  "completed"
+                   },
+                   {
+                       "phase":  2,
+                       "name":  "鏍稿績淇 (骞惰)",
+                       "agents":  [
+                                      "agent-alpha",
+                                      "agent-beta",
+                                      "agent-gamma"
+                                  ],
+                       "status":  "completed"
+                   },
+                   {
+                       "phase":  3,
+                       "name":  "澧炲己鍔熻兘 (骞惰)",
+                       "agents":  [
+                                      "agent-delta",
+                                      "agent-epsilon"
+                                  ],
+                       "status":  "completed"
+                   },
+                   {
+                       "phase":  4,
+                       "name":  "闆嗘垚娴嬭瘯 \u0026 鍙戝竷",
+                       "agents":  [
+
+                                  ],
+                       "status":  "pending"
+                   }
+               ]
+}

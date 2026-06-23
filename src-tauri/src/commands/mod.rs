@@ -17,4 +17,5 @@ pub mod vdb;
 pub mod canvas;
 pub mod canvas_engine;
 pub mod agent;
+pub mod dedup;
 pub mod skill;

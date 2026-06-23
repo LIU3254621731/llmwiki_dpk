@@ -1,0 +1,107 @@
+﻿{
+  "meta": {
+    "version": "0.2.2-dev",
+    "created": "2026-06-23",
+    "description": "LLMWiki 开发任务注册表 — 多Agent协同开发追踪"
+  },
+  "agents": [
+    {
+      "id": "agent-alpha",
+      "name": "Review 可靠性修复",
+      "owner": "Rust 后端",
+      "status": "pending",
+      "priority": 1,
+      "description": "Fix review state machine: strict status transitions, create/update discrimination, prevent silent skipped",
+      "files": [
+        "src-tauri/src/review/review_engine.rs",
+        "src-tauri/src/commands/review.rs"
+      ],
+      "acceptance": [
+        "Accept create_page → status = applied (never skipped)",
+        "Accept update_page with missing target → error or auto-convert",
+        "Batch accept/reject works atomically",
+        "Apply failures show specific error messages"
+      ]
+    },
+    {
+      "id": "agent-beta",
+      "name": "知识图谱可视化修复",
+      "owner": "React 前端",
+      "status": "pending",
+      "priority": 2,
+      "description": "Fix blank graph canvas: render nodes + edges via ReactFlow/X6, add empty state guidance",
+      "files": [
+        "src/components/graph/MindMapView.tsx",
+        "src/components/views/CanvasView.tsx",
+        "src/components/graph/HierarchicalNode.tsx"
+      ],
+      "acceptance": [
+        "Graph displays nodes when data exists (even orphan nodes)",
+        "Edges render between related nodes",
+        "Empty state: 'No graph data yet. Import documents to build knowledge graph.'",
+        "Node click navigates to related wiki page"
+      ]
+    },
+    {
+      "id": "agent-gamma",
+      "name": "UI 美化 & 空状态引导",
+      "owner": "CSS/React",
+      "status": "pending",
+      "priority": 3,
+      "description": "Polish Tailwind theme, add transitions, fix empty state guidance across all views",
+      "files": [
+        "src/styles/theme.css",
+        "src/index.css",
+        "src/components/views/DashboardView.tsx",
+        "src/components/common/ErrorBoundary.tsx"
+      ],
+      "acceptance": [
+        "Consistent spacing/padding across all views",
+        "Smooth transitions on view switching (200-300ms)",
+        "Each empty view shows actionable next step",
+        "Dark/light mode colors consistent"
+      ]
+    },
+    {
+      "id": "agent-delta",
+      "name": "去重系统集成",
+      "owner": "Rust 后端",
+      "status": "pending",
+      "priority": 4,
+      "description": "Wire dedup_service into wiki update pipeline, prevent duplicate entities/concepts",
+      "files": [
+        "src-tauri/src/dedup/dedup_service.rs",
+        "src-tauri/src/agents/wiki_update.rs"
+      ],
+      "acceptance": [
+        "Wiki update agent checks for duplicates before creating pages",
+        "Duplicate entities show merge suggestion in review",
+        "Dedup uses strsim fuzzy matching with configurable threshold"
+      ]
+    },
+    {
+      "id": "agent-epsilon",
+      "name": "文件浏览器增强",
+      "owner": "React 前端",
+      "status": "pending",
+      "priority": 5,
+      "description": "Add right-click context menu, keyboard navigation, real-time search filter",
+      "files": [
+        "src/components/filebrowser/FileTree.tsx",
+        "src/components/filebrowser/FileTreeHeader.tsx"
+      ],
+      "acceptance": [
+        "Right-click: Open / View AI Log / Copy Path / Show in Explorer",
+        "Arrow keys navigate tree nodes",
+        "Enter opens file in editor",
+        "Search input filters tree in real-time"
+      ]
+    }
+  ],
+  "phases": [
+    { "phase": 1, "name": "基础设施", "agents": [], "status": "in_progress" },
+    { "phase": 2, "name": "核心修复", "agents": ["agent-alpha", "agent-beta", "agent-gamma"], "status": "pending" },
+    { "phase": 3, "name": "增强功能", "agents": ["agent-delta", "agent-epsilon"], "status": "pending" },
+    { "phase": 4, "name": "测试 & 发布", "agents": [], "status": "pending" }
+  ]
+}

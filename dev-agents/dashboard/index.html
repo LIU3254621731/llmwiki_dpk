@@ -1,0 +1,199 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLMWiki 开发进度看板</title>
+<style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --border: #334155;
+    --text: #e2e8f0; --muted: #94a3b8;
+    --accent: #3b82f6; --success: #22c55e; --warn: #f59e0b; --error: #ef4444;
+    --pending: #6366f1;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height:100vh; }
+  .container { max-width:960px; margin:0 auto; padding:2rem; }
+  
+  header { text-align:center; margin-bottom:2rem; padding:2rem 0; border-bottom:1px solid var(--border); }
+  header h1 { font-size:1.8rem; margin-bottom:.5rem; }
+  header .subtitle { color:var(--muted); font-size:.9rem; }
+  
+  .stats-bar { display:flex; gap:1rem; margin-bottom:2rem; flex-wrap:wrap; }
+  .stat-card { flex:1; min-width:120px; background:var(--surface); border-radius:12px; padding:1.2rem; text-align:center; border:1px solid var(--border); }
+  .stat-card .num { font-size:2rem; font-weight:700; }
+  .stat-card .label { color:var(--muted); font-size:.8rem; margin-top:.3rem; }
+  .stat-card.done .num { color:var(--success); }
+  .stat-card.progress .num { color:var(--accent); }
+  .stat-card.pending .num { color:var(--pending); }
+  .stat-card.failed .num { color:var(--error); }
+  
+  .progress-bar { background:var(--surface); border-radius:8px; height:8px; margin-bottom:2rem; overflow:hidden; }
+  .progress-bar .fill { height:100%; background:linear-gradient(90deg, var(--accent), var(--success)); border-radius:8px; transition:width .5s ease; }
+  
+  .phase { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.5rem; margin-bottom:1rem; }
+  .phase-header { display:flex; align-items:center; gap:.8rem; margin-bottom:1rem; }
+  .phase-header h3 { font-size:1.1rem; }
+  .badge { padding:.2rem .7rem; border-radius:20px; font-size:.75rem; font-weight:600; }
+  .badge.progress { background:var(--accent); color:#fff; }
+  .badge.pending { background:var(--border); color:var(--muted); }
+  .badge.done { background:var(--success); color:#fff; }
+  
+  .agent-list { display:flex; flex-direction:column; gap:.6rem; }
+  .agent-item { display:flex; align-items:center; gap:1rem; padding:.8rem 1rem; border-radius:8px; background:var(--bg); }
+  .agent-icon { font-size:1.5rem; width:2.5rem; text-align:center; flex-shrink:0; }
+  .agent-info { flex:1; min-width:0; }
+  .agent-info .name { font-weight:600; }
+  .agent-info .desc { color:var(--muted); font-size:.8rem; margin-top:.1rem; }
+  .agent-info .files { color:var(--muted); font-size:.7rem; margin-top:.2rem; font-family:'Cascadia Code',Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .agent-status { font-size:.75rem; padding:.25rem .6rem; border-radius:12px; font-weight:600; white-space:nowrap; flex-shrink:0; }
+  .agent-status.done { background:rgba(34,197,94,.15); color:var(--success); }
+  .agent-status.pending { background:rgba(99,102,241,.15); color:var(--pending); }
+  .agent-status.analyzing, .agent-status.coding, .agent-status.reviewing { background:rgba(59,130,246,.15); color:var(--accent); animation:pulse 1.5s infinite; }
+  .agent-status.failed { background:rgba(239,68,68,.15); color:var(--error); }
+  
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+  
+  .checks { margin-top:.5rem; padding:.5rem .8rem; border-radius:6px; background:rgba(34,197,94,.05); font-size:.75rem; }
+  .checks li { color:var(--muted); margin:.15rem 0; }
+  .checks li::before { content:"✓ "; color:var(--success); }
+  
+  footer { text-align:center; padding:2rem; color:var(--muted); font-size:.75rem; border-top:1px solid var(--border); margin-top:3rem; }
+  .toolbar { display:flex; justify-content:center; gap:.6rem; margin-bottom:1.5rem; }
+  .toolbar button { background:var(--accent); color:#fff; border:none; padding:.6rem 1.5rem; border-radius:8px; cursor:pointer; font-size:.85rem; }
+  .toolbar button:hover { opacity:.9; }
+  .toolbar button.secondary { background:var(--surface); border:1px solid var(--border); }
+  .auto-refresh { font-size:.7rem; color:var(--muted); text-align:center; margin-top:.5rem; }
+  
+  .legend { display:flex; gap:1.5rem; justify-content:center; margin-bottom:1.5rem; font-size:.75rem; color:var(--muted); }
+  .legend span { display:flex; align-items:center; gap:.3rem; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+  .dot.done { background:var(--success); }
+  .dot.progress { background:var(--accent); }
+  .dot.pending { background:var(--pending); }
+  .dot.failed { background:var(--error); }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>LLMWiki 开发进度看板</h1>
+    <div class="subtitle">LangGraph 多 Agent 协作开发系统</div>
+  </header>
+
+  <div class="legend">
+    <span><span class="dot done"></span> 已完成</span>
+    <span><span class="dot progress"></span> 进行中</span>
+    <span><span class="dot pending"></span> 待开始</span>
+    <span><span class="dot failed"></span> 失败</span>
+  </div>
+
+  <div class="stats-bar" id="stats"></div>
+  <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
+
+  <div class="toolbar">
+    <button onclick="loadData()">刷新数据</button>
+    <button class="secondary" onclick="window.open('/api/tasks')">查看JSON</button>
+  </div>
+
+  <div id="phases"></div>
+
+  <footer>
+    <div class="auto-refresh">每 30 秒自动刷新 | 端口 9999</div>
+  </footer>
+</div>
+
+<script>
+var STATUS_MAP = {
+  pending: { icon: '⏳', label: '待开始' },
+  analyzing: { icon: '🔍', label: '分析中' },
+  coding: { icon: '✏️', label: '编码中' },
+  reviewing: { icon: '👀', label: '审查中' },
+  done: { icon: '✅', label: '已完成' },
+  failed: { icon: '❌', label: '失败' }
+};
+
+var AGENT_ICONS = {
+  'agent-alpha': '🔍', 'agent-beta': '🕸️', 'agent-gamma': '🎨',
+  'agent-delta': '🔄', 'agent-epsilon': '📁'
+};
+
+var PHASE_STATUS_MAP = {
+  'completed': { label: '已完成', cls: 'done' },
+  'in_progress': { label: '进行中', cls: 'progress' },
+  'pending': { label: '待开始', cls: 'pending' }
+};
+
+async function loadData() {
+  try {
+    var resp = await fetch('/api/tasks');
+    var data = await resp.json();
+    render(data);
+  } catch(e) {
+    document.getElementById('phases').innerHTML =
+      '<div class="phase"><p style="color:var(--muted);text-align:center">⚠️ 无法连接到协调器。请运行: <code>python dev-agents/dashboard.py</code></p></div>';
+  }
+}
+
+function render(data) {
+  var agents = data.agents || [];
+  var done = agents.filter(function(a) { return a.status === 'done'; }).length;
+  var failed = agents.filter(function(a) { return a.status === 'failed'; }).length;
+  var pending = agents.filter(function(a) { return a.status === 'pending'; }).length;
+  var inProgress = agents.length - done - failed - pending;
+  var pct = Math.round(done / Math.max(agents.length, 1) * 100);
+
+  document.getElementById('stats').innerHTML =
+    '<div class="stat-card done"><div class="num">' + done + '</div><div class="label">✅ 已完成</div></div>' +
+    '<div class="stat-card progress"><div class="num">' + inProgress + '</div><div class="label">🔄 进行中</div></div>' +
+    '<div class="stat-card pending"><div class="num">' + pending + '</div><div class="label">⏳ 待开始</div></div>' +
+    '<div class="stat-card failed"><div class="num">' + failed + '</div><div class="label">❌ 失败</div></div>';
+  document.getElementById('progressFill').style.width = pct + '%';
+
+  var phasesHTML = '';
+  (data.phases || []).forEach(function(phase) {
+    var ps = PHASE_STATUS_MAP[phase.status] || { label: phase.status, cls: 'pending' };
+    phasesHTML += '<div class="phase">' +
+      '<div class="phase-header">' +
+        '<h3>Phase ' + phase.phase + ': ' + phase.name + '</h3>' +
+        '<span class="badge ' + ps.cls + '">' + ps.label + '</span>' +
+      '</div>' +
+      '<div class="agent-list">';
+
+    var phaseAgents = agents.filter(function(a) {
+      return (phase.agents || []).indexOf(a.id) !== -1;
+    });
+    
+    if (phaseAgents.length === 0 && phase.status === 'pending') {
+      phasesHTML += '<div style="color:var(--muted);font-size:.8rem;padding:.5rem 0">等待前置阶段完成...</div>';
+    }
+
+    phaseAgents.forEach(function(a) {
+      var sm = STATUS_MAP[a.status] || { icon: '❓', label: a.status };
+      var icon = AGENT_ICONS[a.id] || '🤖';
+      phasesHTML += '<div class="agent-item">' +
+        '<div class="agent-icon">' + icon + '</div>' +
+        '<div class="agent-info">' +
+          '<div class="name">' + a.name + '</div>' +
+          '<div class="desc">' + a.description + '</div>' +
+          '<div class="files">' + (a.files||[]).join(', ') + '</div>' +
+        '</div>' +
+        '<span class="agent-status ' + a.status + '">' + sm.icon + ' ' + sm.label + '</span>' +
+      '</div>';
+      
+      if (a.acceptance && a.acceptance.length) {
+        phasesHTML += '<div class="checks"><ul>' +
+          a.acceptance.map(function(c) { return '<li>' + c + '</li>'; }).join('') +
+        '</ul></div>';
+      }
+    });
+    phasesHTML += '</div></div>';
+  });
+  document.getElementById('phases').innerHTML = phasesHTML;
+}
+
+loadData();
+setInterval(loadData, 30000);
+</script>
+</body>
+</html>

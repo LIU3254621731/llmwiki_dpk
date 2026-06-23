@@ -1,4 +1,4 @@
-/** @type {import('tailwindcss').Config} */
+﻿/** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
   content: [
@@ -8,6 +8,17 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Brand palette — used by 15+ components
+        brand: {
+          50:  '#eff6ff',
+          300: '#93c5fd',
+          400: '#60a5fa',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+          800: '#1e40af',
+          900: '#1e3a5f',
+        },
         // Core surfaces
         background: 'var(--background)',
         card: {

@@ -1,8 +1,9 @@
-import { useKBStore } from "@/stores/useKBStore";
+﻿import { useKBStore } from "@/stores/useKBStore";
 import { useAppStore } from "@/stores/useAppStore";
 import { useEffect, useRef, useState } from "react";
 import { useEditorStore } from "@/stores/useEditorStore";
-import { Circle, GitPullRequestDraft, PanelRightOpen, PanelBottomOpen } from "lucide-react";
+import { Circle, GitPullRequestDraft, PanelRightOpen, PanelBottomOpen, Database } from "lucide-react";
+const APP_VERSION = "0.2.1";
 
 interface AgentActivity {
   agent_name: string;
@@ -51,7 +52,7 @@ function getHealthInfo(stats: {
   if (health_status === "critical")
     return { color: "bg-destructive", label: `知识库健康度: 严重`, issueCount: issues };
   if (health_status === "warning" || issues > 0)
-    return { color: "bg-warning", label: `知识库健康度: 有 ${issues} 个问题`, issueCount: issues };
+    return { color: "bg-warning", label: `知识库健康度: 有${issues} 个问题`, issueCount: issues };
   return { color: "bg-success", label: "知识库健康度: 正常", issueCount: 0 };
 }
 
@@ -85,12 +86,10 @@ export default function StatusBar() {
       try {
         const { listen } = await import("@tauri-apps/api/event");
         const unlisten = await listen<AgentActivity>("agent-activity", (event) => {
-          // Clear any pending dismiss timer
           if (activityTimerRef.current) {
             clearTimeout(activityTimerRef.current);
           }
           setAgentActivity(event.payload);
-          // Auto-dismiss after 60 seconds
           activityTimerRef.current = setTimeout(() => {
             setAgentActivity(null);
           }, 60_000);
@@ -112,7 +111,6 @@ export default function StatusBar() {
   // KB stats listener (dynamic Tauri import, 500ms debounce)
   const lastStatsRefresh = useRef(0);
 
-  // Reset debounce timer on KB switch
   useEffect(() => {
     lastStatsRefresh.current = 0;
   }, [currentKB?.id]);
@@ -151,8 +149,11 @@ export default function StatusBar() {
   const health = getHealthInfo(stats);
 
   return (
-    <div className="h-8 bg-statusbar-bg border-t border-statusbar-border flex items-center px-4 text-xs text-muted-foreground gap-3">
-      <span className="font-medium">{currentKB?.name ?? "未选择知识库"}</span>
+    <div className="h-8 bg-gradient-to-r from-statusbar-bg via-statusbar-bg to-slate-800/30 dark:to-slate-900/30 border-t border-statusbar-border flex items-center px-4 text-xs text-muted-foreground gap-3">
+      <span className="flex items-center gap-1.5 font-medium">
+        <Database size={12} className="text-muted-foreground" />
+        {currentKB?.name ?? "未选择知识库"}
+      </span>
       <span className="text-muted-foreground">|</span>
 
       {/* Right sidebar toggle */}
@@ -243,7 +244,7 @@ export default function StatusBar() {
         </>
       )}
 
-      <span className="ml-auto">v0.2.0-dev | {time}</span>
+      <span className="ml-auto">v{APP_VERSION} | {time}</span>
     </div>
   );
 }
