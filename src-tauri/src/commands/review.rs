@@ -600,7 +600,7 @@ fn apply_review_item_impl(
         }
     }
 
-    crate::graph::graph_service::GraphService::sync_from_knowledge_items(&kernel.db, kb_id)?;
+    crate::graph::graph_service::GraphService::sync_from_wiki_pages(&kernel.db, kb_id)?;
     if let Err(e) = crate::graph::graph_service::GraphService::derive_relationships(&kernel.db, kb_id) {
         log::error!("[review] derive_relationships 失败 (kb={}): {}", kb_id, e);
     }

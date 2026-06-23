@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+﻿import { useEffect, useState, useRef, useCallback } from "react";
 import { useKBStore } from "@/stores/useKBStore";
 import { useReviewStore } from "@/stores/useReviewStore";
+import { useAppStore } from "@/stores/useAppStore";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -40,6 +41,7 @@ export default function ImportReviewTab() {
 
   const [uploadMsg, setUploadMsg] = useState("");
   const [uploadError, setUploadError] = useState("");
+  const [uploadedTaskIds, setUploadedTaskIds] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [supportedTypes, setSupportedTypes] = useState<{extension: string; mime_type: string; description: string}[]>([]);
 
@@ -76,8 +78,16 @@ export default function ImportReviewTab() {
       if (!selected) return;
       setUploading(true); setUploadMsg(""); setUploadError("");
       const files = Array.isArray(selected) ? selected : [selected];
+      const taskIds: string[] = [];
       for (const path of files) {
-        await invoke("upload_source_file", { kbId: currentKB.id, filePath: path as string });
+        const result = await invoke<{task_id: string; file_name: string; type: string}>("upload_source_file", { kbId: currentKB.id, filePath: path as string });
+        if (result?.task_id) {
+          taskIds.push(result.task_id);
+        }
+      }
+      setUploadedTaskIds(taskIds);
+      if (taskIds.length > 0) {
+        useAppStore.getState().setTaskDetailId(taskIds[0]);
       }
       setUploadMsg(`成功上传 ${files.length} 个文件`);
       loadPendingReviews(currentKB.id);
@@ -142,6 +152,21 @@ export default function ImportReviewTab() {
           </div>
           {uploadMsg && <div className="mt-2 px-3 py-2 text-xs text-green-600 bg-green-50 border border-green-100 rounded">{uploadMsg}</div>}
           {uploadError && <div className="mt-2 px-3 py-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded">{uploadError}</div>}
+          {uploadedTaskIds.length > 0 && (
+            <div className="mt-2 px-3 py-2 text-xs text-brand-500 bg-brand-50 border border-brand-100 rounded dark:bg-brand-900/20 dark:text-brand-400 dark:border-brand-800 space-y-1">
+              {uploadedTaskIds.map((tid, i) => (
+                <button
+                  key={tid}
+                  type="button"
+                  onClick={() => useAppStore.getState().setTaskDetailId(tid)}
+                  className="block hover:underline cursor-pointer w-full text-left"
+                >
+                  {"\u4efb\u52a1"} #{tid.slice(0, 8)}... {"\u5df2\u521b\u5efa"}
+                  {uploadedTaskIds.length > 1 && ` (${i + 1}/${uploadedTaskIds.length})`}
+                </button>
+              ))}
+            </div>
+          )}
           {supportedTypes.length > 0 && (
             <p className="mt-2 text-[10px] text-slate-400">支持: {supportedTypes.map(t => t.extension).join(", ")}</p>
           )}

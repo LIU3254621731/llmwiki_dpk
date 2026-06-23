@@ -63,7 +63,7 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
       // Code block
       if (line.trim().startsWith("```")) {
         if (inCodeBlock) {
-          html += `<pre class="bg-slate-100 rounded-lg p-4 overflow-x-auto text-xs my-3"><code class="language-${codeLang}">${escapeHtml(codeContent.trimEnd())}</code></pre>`;
+          html += `<pre class="bg-slate-100 dark:bg-slate-800 rounded-lg p-4 overflow-x-auto text-xs my-3"><code class="language-${codeLang}">${escapeHtml(codeContent.trimEnd())}</code></pre>`;
           codeContent = "";
           inCodeBlock = false;
         } else {
@@ -111,35 +111,35 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
         if (inList) { html += `</${listType}>`; inList = false; listType = ""; }
         const text = line.slice(4).trim();
         toc.push({ level: 3, text, id: slugify(text) });
-        html += `<h3 class="text-base font-semibold text-slate-800 mt-5 mb-2" id="${slugify(text)}"><a href="#${slugify(text)}" class="text-brand-500 opacity-0 hover:opacity-100 absolute -ml-5 pr-1">#</a>${renderInline(text)}</h3>`;
+        html += `<h3 class="text-base font-semibold text-slate-800 dark:text-slate-100 mt-5 mb-2" id="${slugify(text)}"><a href="#${slugify(text)}" class="text-brand-500 opacity-0 hover:opacity-100 absolute -ml-5 pr-1">#</a>${renderInline(text)}</h3>`;
         continue;
       }
       if (line.startsWith("## ")) {
         if (inList) { html += `</${listType}>`; inList = false; listType = ""; }
         const text = line.slice(3).trim();
         toc.push({ level: 2, text, id: slugify(text) });
-        html += `<h2 class="text-lg font-semibold text-slate-800 mt-6 mb-2 pb-1 border-b border-slate-200" id="${slugify(text)}"><a href="#${slugify(text)}" class="text-brand-500 opacity-0 hover:opacity-100 absolute -ml-5 pr-1">#</a>${renderInline(text)}</h2>`;
+        html += `<h2 class="text-lg font-semibold text-slate-800 dark:text-slate-100 mt-6 mb-2 pb-1 border-b border-slate-200 dark:border-slate-600" id="${slugify(text)}"><a href="#${slugify(text)}" class="text-brand-500 opacity-0 hover:opacity-100 absolute -ml-5 pr-1">#</a>${renderInline(text)}</h2>`;
         continue;
       }
       if (line.startsWith("# ")) {
         if (inList) { html += `</${listType}>`; inList = false; listType = ""; }
         const text = line.slice(2).trim();
         toc.push({ level: 1, text, id: slugify(text) });
-        html += `<h1 class="text-xl font-bold text-slate-900 mt-4 mb-3" id="${slugify(text)}">${renderInline(text)}</h1>`;
+        html += `<h1 class="text-xl font-bold text-slate-900 dark:text-slate-50 mt-4 mb-3" id="${slugify(text)}">${renderInline(text)}</h1>`;
         continue;
       }
 
       // Blockquote
       if (line.startsWith("> ")) {
         if (inList) { html += `</${listType}>`; inList = false; listType = ""; }
-        html += `<blockquote class="border-l-4 border-brand-300 bg-brand-50/50 pl-4 py-1 my-2 text-sm text-slate-600">${renderInline(line.slice(2).trim())}</blockquote>`;
+        html += `<blockquote class="border-l-4 border-brand-300 bg-brand-50/50 pl-4 py-1 my-2 text-sm text-slate-600 dark:text-slate-300">${renderInline(line.slice(2).trim())}</blockquote>`;
         continue;
       }
 
       // Horizontal rule
       if (line.trim() === "---" || line.trim() === "***") {
         if (inList) { html += `</${listType}>`; inList = false; listType = ""; }
-        html += `<hr class="my-4 border-slate-200" />`;
+        html += `<hr class="my-4 border-slate-200 dark:border-slate-600" />`;
         continue;
       }
 
@@ -147,7 +147,7 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
       if (line.match(/^[\s]*[-*+]\s/)) {
         if (!inList || listType !== "ul") {
           if (inList) html += `</${listType}>`;
-          html += `<ul class="list-disc list-inside space-y-1 my-2 text-sm text-slate-700">`;
+          html += `<ul class="list-disc list-inside space-y-1 my-2 text-sm text-slate-700 dark:text-slate-200">`;
           inList = true;
           listType = "ul";
         }
@@ -160,7 +160,7 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
       if (line.match(/^[\s]*\d+\.\s/)) {
         if (!inList || listType !== "ol") {
           if (inList) html += `</${listType}>`;
-          html += `<ol class="list-decimal list-inside space-y-1 my-2 text-sm text-slate-700">`;
+          html += `<ol class="list-decimal list-inside space-y-1 my-2 text-sm text-slate-700 dark:text-slate-200">`;
           inList = true;
           listType = "ol";
         }
@@ -171,11 +171,11 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
 
       // Regular paragraph
       if (inList) { html += `</${listType}>`; inList = false; listType = ""; }
-      html += `<p class="text-sm text-slate-700 leading-relaxed my-1">${renderInline(line)}</p>`;
+      html += `<p class="text-sm text-slate-700 dark:text-slate-200 leading-relaxed my-1">${renderInline(line)}</p>`;
     }
 
     if (inCodeBlock) {
-      html += `<pre class="bg-slate-100 rounded-lg p-4 overflow-x-auto text-xs my-3"><code>${escapeHtml(codeContent.trimEnd())}</code></pre>`;
+      html += `<pre class="bg-slate-100 dark:bg-slate-800 rounded-lg p-4 overflow-x-auto text-xs my-3"><code>${escapeHtml(codeContent.trimEnd())}</code></pre>`;
     }
     if (inTable) { html += renderTable(tableHtml); }
     if (inList) { html += `</${listType}>`; }
@@ -191,7 +191,7 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
       const cells = row.split("|").filter((c) => c.trim().length > 0);
       if (idx === 1 && cells.every((c) => c.trim().match(/^[-:]+$/))) return; // separator
       const tag = idx === 0 ? "th" : "td";
-      const cellClass = idx === 0 ? "bg-slate-50 font-medium text-slate-700 px-3 py-2 border border-slate-200" : "text-slate-600 px-3 py-2 border border-slate-200";
+      const cellClass = idx === 0 ? "bg-slate-50 dark:bg-slate-800 font-medium text-slate-700 dark:text-slate-200 px-3 py-2 border border-slate-200 dark:border-slate-600" : "text-slate-600 dark:text-slate-300 px-3 py-2 border border-slate-200 dark:border-slate-600";
       html += "<tr>";
       cells.forEach((cell) => {
         html += `<${tag} class="${cellClass}">${renderInline(cell.trim())}</${tag}>`;
@@ -207,7 +207,7 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
     // Citation references: [1], [1-3], [1,2,3] — before code to avoid conflict with backtick pattern
     result = result.replace(/\[(\d+(?:[-,]\d+)*)\]/g, '<span class="citation-tag inline-flex items-center gap-0.5 bg-primary/10 text-primary rounded px-1 text-[11px] font-medium cursor-pointer align-text-top leading-none pt-px hover:bg-primary/20 active:bg-primary/30 transition-colors select-none" data-citation-ref="$1">[$1]</span>');
     // Code
-    result = result.replace(/`([^`]+)`/g, '<code class="bg-slate-100 text-red-600 px-1 py-0.5 rounded text-xs font-mono">$1</code>');
+    result = result.replace(/`([^`]+)`/g, '<code class="bg-slate-100 dark:bg-slate-800 text-red-600 dark:text-red-400 px-1 py-0.5 rounded text-xs font-mono">$1</code>');
     // Bold + Italic
     result = result.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
     // Bold
@@ -215,14 +215,14 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
     // Italic
     result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
     // Wiki links [[page]]
-    result = result.replace(/\[\[([^\]]+)\]\]/g, '<span class="text-brand-600 underline cursor-pointer hover:text-brand-800" data-wiki-link="$1">$1</span>');
+    result = result.replace(/\[\[([^\]]+)\]\]/g, '<span class="text-brand-600 dark:text-brand-400 underline cursor-pointer hover:text-brand-800 dark:hover:text-brand-300" data-wiki-link="$1">$1</span>');
     // Links (filter javascript: URLs)
     result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m: string, label: string, href: string) => {
       const safe = /^\s*(javascript|data)\s*:/i.test(href) ? "#" : href;
-      return `<a href="${safe}" class="text-brand-600 underline hover:text-brand-800" target="_blank" rel="noopener">${label}</a>`;
+      return `<a href="${safe}" class="text-brand-600 dark:text-brand-400 underline hover:text-brand-800 dark:hover:text-brand-300" target="_blank" rel="noopener">${label}</a>`;
     });
     // Images
-    result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<span class="inline-block text-xs text-slate-400 italic">[图片: $1]</span>');
+    result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<span class="inline-block text-xs text-slate-400 dark:text-slate-500 italic">[图片: $1]</span>');
     return result;
   };
 
@@ -333,10 +333,10 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
   return (
     <div className={`${className}`}>
       {bodyToc.length > 0 && (
-        <div className="mb-6 bg-slate-50 border border-slate-200 rounded-lg overflow-hidden">
+        <div className="mb-6 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg overflow-hidden">
           <button
             onClick={() => setTocCollapsed(!tocCollapsed)}
-            className="flex items-center gap-2 px-4 py-2 w-full text-sm font-medium text-slate-600 hover:bg-slate-100"
+            className="flex items-center gap-2 px-4 py-2 w-full text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
           >
             {tocCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
             目录
@@ -347,7 +347,7 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
                 <a
                   key={item.id}
                   href={`#${item.id}`}
-                  className={`block text-sm text-slate-500 hover:text-brand-600 truncate ${
+                  className={`block text-sm text-slate-500 dark:text-slate-400 hover:text-brand-600 truncate ${
                     item.level === 1 ? "font-medium" : item.level === 2 ? "pl-0" : "pl-6 text-xs"
                   }`}
                   onClick={(e) => {
@@ -364,7 +364,7 @@ export default function MarkdownRenderer({ content, hideFrontmatter = true, clas
       )}
       <div
         ref={containerRef}
-        className="prose prose-slate max-w-none"
+        className="max-w-none text-slate-700 dark:text-slate-200"
         dangerouslySetInnerHTML={{ __html: bodyHtml }}
       />
     </div>

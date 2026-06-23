@@ -60,100 +60,53 @@ impl GraphService {
     pub fn get_graph_data(db: &Arc<DatabaseService>, kb_id: &str) -> Result<GraphData, String> {
         let conn = db.connect()?;
 
+        // Read nodes exclusively from wiki_pages (post-review) ? never from knowledge_items (pre-review)
         let mut node_stmt = conn.prepare(
-            "SELECT ki.id, ki.item_type, ki.canonical_name, COALESCE(ki.page_path,''), COALESCE(ki.summary,''),
-                    (SELECT COUNT(*) FROM relationships WHERE source_item_id = ki.id AND kb_id = ki.kb_id) as out_deg,
-                    (SELECT COUNT(*) FROM relationships WHERE target_item_id = ki.id AND kb_id = ki.kb_id) as in_deg,
-                    COALESCE(ki.created_at,'')
-             FROM knowledge_items ki WHERE ki.kb_id = ?1"
-        ).map_err(|e| format!("查询节点失败: {}", e))?;
+            "SELECT wp.id, wp.page_type, wp.title, COALESCE(wp.path,''), '' as summary,
+                    0 as out_deg, 0 as in_deg,
+                    COALESCE(wp.created_at,'')
+             FROM wiki_pages wp WHERE wp.kb_id = ?1"
+        ).map_err(|e| format!("??????: {}", e))?;
 
         let node_mapped = node_stmt.query_map(rusqlite::params![kb_id], |row| {
             Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?,
                 row.get::<_,String>(3)?, row.get::<_,String>(4)?,
                 row.get::<_,i32>(5)?, row.get::<_,i32>(6)?, row.get::<_,String>(7)?))
-        }).map_err(|e| format!("映射节点失败: {}", e))?;
+        }).map_err(|e| format!("??????: {}", e))?;
         let node_raws: Vec<_> = node_mapped
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("读取知识项节点失败: {}", e))?;
+            .map_err(|e| format!("?????????: {}", e))?;
 
         let mut nodes = Vec::new();
-        for (id, node_type, label, path, summary, out_deg, in_deg, created_at) in &node_raws {
-            let mut alias_stmt = conn.prepare(
-                "SELECT a.alias FROM aliases a JOIN knowledge_items k ON a.item_id = k.id WHERE k.kb_id = ?1 AND a.item_id = ?2"
-            ).map_err(|e| format!("查询别名失败: {}", e))?;
-            let aliases: Vec<String> = alias_stmt.query_map(
-                rusqlite::params![kb_id, id], |row| row.get(0)
-            ).map_err(|e| format!("映射别名失败: {}", e))?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("读取别名列表失败: {}", e))?;
-
-            let source_count: i32 = match conn.query_row(
-                "SELECT COUNT(*) FROM knowledge_items ki2 JOIN sources s ON s.id = ki2.source_id WHERE ki2.kb_id = ?1 AND ki2.canonical_name = ?2",
-                rusqlite::params![kb_id, label],
-                |row| row.get(0),
+        for (id, node_type, label, path, summary, _out_deg, _in_deg, created_at) in &node_raws {
+            // Post-review: compute in/out degree from graph_edges
+            let (in_deg, out_deg) = match conn.query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM graph_edges WHERE kb_id = ?1 AND target_node_id = ?2),
+                    (SELECT COUNT(*) FROM graph_edges WHERE kb_id = ?1 AND source_node_id = ?2)",
+                rusqlite::params![kb_id, id],
+                |row| Ok((row.get::<_,i32>(0)?, row.get::<_,i32>(1)?)),
             ) {
-                Ok(c) => c,
-                Err(rusqlite::Error::QueryReturnedNoRows) => 0,
-                Err(e) => return Err(format!("查询图谱节点 source_count 失败 (label={}): {}", label, e)),
+                Ok((i, o)) => (i, o),
+                Err(_) => (0, 0),
             };
 
             nodes.push(GraphNode {
                 id: id.clone(), node_type: node_type.clone(), label: label.clone(),
-                path: path.clone(), aliases, tags: vec![],
-                summary: summary.clone(), source_count,
-                in_degree: *in_deg, out_degree: *out_deg,
+                path: path.clone(), aliases: vec![], tags: vec![],
+                summary: summary.clone(), source_count: 0,
+                in_degree: in_deg, out_degree: out_deg,
                 status: "normal".into(), created_at: created_at.clone(),
             });
         }
 
-        let wp_stmt = conn.prepare(
-            "SELECT id, page_type, title, path, '' as summary, created_at FROM wiki_pages WHERE kb_id = ?1"
-        );
-        if let Ok(mut stmt) = wp_stmt {
-            if let Ok(mapped) = stmt.query_map(rusqlite::params![kb_id], |row| {
-                Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?,
-                    row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,String>(5)?))
-            }) {
-                for row in mapped.filter_map(|r| r.ok()) {
-                    let (id, pt, title, path, summary, created_at) = row;
-                    let node_type = match pt.as_str() {
-                        "entity" => "entity".to_string(),
-                        "topic" => "topic".to_string(),
-                        "question" => "question".to_string(),
-                        "source" => "source".to_string(),
-                        "concept" => "concept".to_string(),
-                        "review" => "wikipage".to_string(),
-                        _ => "wikipage".to_string(),
-                    };
-                    nodes.push(GraphNode {
-                        id, node_type, label: title, path,
-                        aliases: vec![], tags: vec![],
-                        summary, source_count: 0,
-                        in_degree: 0, out_degree: 0,
-                        status: "normal".into(), created_at,
-                    });
-                }
-            }
-        }
-
-        // 优先读 graph_edges（sync 后的主表），若为空则回退到 relationships
-        let edge_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM graph_edges WHERE kb_id = ?1", rusqlite::params![kb_id], |row| row.get(0)
-        ).unwrap_or_else(|e| { log::warn!("graph_edges COUNT 查询失败，回退到 relationships: {}", e); 0 });
-
-        let edge_query = if edge_count > 0 {
-            "SELECT e.id, e.source_node_id, e.target_node_id, e.relation, COALESCE(e.confidence,'medium'),
+        // Read edges exclusively from graph_edges (post-review sync) ? never fall back to pre-review relationships
+        let mut edge_stmt = conn.prepare(
+            "SELECT e.id, e.source_node_id, e.target_node_id, COALESCE(e.relation, e.edge_type), COALESCE(e.confidence,'medium'),
                     COALESCE(e.evidence_source_id,''), COALESCE(e.evidence_location,''), COALESCE(e.citation_status,'uncited')
-             FROM graph_edges e WHERE e.kb_id = ?1".to_string()
-        } else {
-            "SELECT r.id, r.source_item_id, r.target_item_id, r.relation, COALESCE(r.confidence,'medium'),
-                    COALESCE(r.evidence_source_id,''), COALESCE(r.evidence_location,''), COALESCE(r.status,'active')
-             FROM relationships r WHERE r.kb_id = ?1".to_string()
-        };
-
-        let mut edge_stmt = conn.prepare(&edge_query)
-            .map_err(|e| format!("查询边失败: {}", e))?;
+             FROM graph_edges e WHERE e.kb_id = ?1"
+        )
+            .map_err(|e| format!("?????: {}", e))?;
 
         let edge_mapped = edge_stmt.query_map(rusqlite::params![kb_id], |row| {
             Ok((
@@ -161,10 +114,10 @@ impl GraphService {
                 row.get::<_,String>(3)?, row.get::<_,String>(4)?,
                 row.get::<_,String>(5)?, row.get::<_,String>(6)?, row.get::<_,String>(7)?
             ))
-        }).map_err(|e| format!("映射边失败: {}", e))?;
+        }).map_err(|e| format!("?????: {}", e))?;
         let edge_raws: Vec<_> = edge_mapped
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("读取关系边失败: {}", e))?;
+            .map_err(|e| format!("???????: {}", e))?;
 
         let mut edges = Vec::new();
         let mut low_conf = 0i64; let mut conflict = 0i64; let mut needs_review = 0i64;
@@ -185,18 +138,14 @@ impl GraphService {
             });
         }
 
-        // ----- 健康指标 -----
-        let referenced: i64 = match conn.query_row(
-            "SELECT COUNT(DISTINCT ki.id) FROM knowledge_items ki
-             INNER JOIN relationships r ON (r.source_item_id = ki.id OR r.target_item_id = ki.id)
-             WHERE ki.kb_id = ?1",
-            rusqlite::params![kb_id],
-            |row| row.get(0),
-        ) {
-            Ok(c) => c,
-            Err(rusqlite::Error::QueryReturnedNoRows) => 0,
-            Err(e) => return Err(format!("查询关联节点计数失败: {}", e)),
-        };
+        // ----- ???? -----
+        // Compute referenced count from edges (post-review: only graph_edges matter)
+        let mut ref_set = std::collections::HashSet::new();
+        for e in &edges {
+            ref_set.insert(e.source.clone());
+            ref_set.insert(e.target.clone());
+        }
+        let referenced: i64 = ref_set.len() as i64;
         let orphan = nodes.len() as i64 - referenced;
         let avg_deg = if nodes.is_empty() { 0.0 } else {
             let total_deg: i64 = nodes.iter().map(|n| (n.in_degree + n.out_degree) as i64).sum();
@@ -223,26 +172,27 @@ impl GraphService {
         Ok(GraphData { nodes, edges, health })
     }
 
-    pub fn sync_from_knowledge_items(db: &Arc<DatabaseService>, kb_id: &str) -> Result<(), String> {
+    
+    pub fn sync_from_wiki_pages(db: &Arc<DatabaseService>, kb_id: &str) -> Result<(), String> {
         let conn = db.connect()?;
 
         conn.execute("DELETE FROM graph_nodes WHERE kb_id = ?1", rusqlite::params![kb_id])
-            .map_err(|e| format!("清除旧节点失败: {}", e))?;
+            .map_err(|e| format!("???????: {}", e))?;
         conn.execute("DELETE FROM graph_edges WHERE kb_id = ?1", rusqlite::params![kb_id])
-            .map_err(|e| format!("清除旧边失败: {}", e))?;
+            .map_err(|e| format!("??????: {}", e))?;
 
-        // 1. 从 wiki_pages 生成节点（v0.1.4: 确保即使没有 knowledge_items 也有节点）
+        // 1. Generate nodes from wiki_pages (post-review)
         {
             let mut wp_stmt = conn.prepare(
                 "SELECT id, title, page_type, path, COALESCE(tags,''), created_at FROM wiki_pages WHERE kb_id = ?1"
-            ).map_err(|e| format!("准备 wiki_pages 查询失败: {}", e))?;
+            ).map_err(|e| format!("?? wiki_pages ????: {}", e))?;
 
             let wp_items: Vec<(String, String, String, String, String, String)> = wp_stmt
                 .query_map(rusqlite::params![kb_id], |row| {
                     Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
-                }).map_err(|e| format!("查询 wiki_pages 失败: {}", e))?
+                }).map_err(|e| format!("?? wiki_pages ??: {}", e))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("读取 wiki_pages 节点行失败: {}", e))?;
+                .map_err(|e| format!("?? wiki_pages ?????: {}", e))?;
 
             for (page_id, title, page_type, path, tags, created_at) in &wp_items {
                 let node_type = match page_type.as_str() {
@@ -259,58 +209,22 @@ impl GraphService {
                     "INSERT INTO graph_nodes (id, kb_id, node_type, label, path, aliases, tags, summary, source_count, in_degree, out_degree, status, source_id, page_id, confidence, created_at, metadata)
                      VALUES (?1, ?2, ?3, ?4, ?5, '', ?6, '', 0, 0, 0, 'active', '', ?1, 'medium', ?7, '{}')",
                     rusqlite::params![page_id, kb_id, node_type, title, path, tags, created_at],
-                ).map_err(|e| format!("插入 wiki_page 节点失败: {}", e))?;
+                ).map_err(|e| format!("?? wiki_page ????: {}", e))?;
             }
         }
 
-        // 2. 从 knowledge_items 补充节点
-        {
-            let mut stmt = conn.prepare(
-                "SELECT id, item_type, canonical_name, COALESCE(page_path,''), COALESCE(source_id,'') FROM knowledge_items WHERE kb_id = ?1"
-            ).map_err(|e| format!("准备查询失败: {}", e))?;
-
-            let mapped = stmt.query_map(rusqlite::params![kb_id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
-            }).map_err(|e| format!("查询知识项失败: {}", e))?;
-            let items: Vec<(String, String, String, String, String)> = mapped
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("读取知识项节点行失败: {}", e))?;
-
-            for (ki_id, item_type, canonical_name, page_path, source_id) in items {
-                // 避免重复节点
-                let existing: i64 = match conn.query_row(
-                    "SELECT COUNT(*) FROM graph_nodes WHERE kb_id = ?1 AND label = ?2 AND node_type = ?3",
-                    rusqlite::params![kb_id, canonical_name, item_type],
-                    |row| row.get(0),
-                ) {
-                    Ok(c) => c,
-                    Err(rusqlite::Error::QueryReturnedNoRows) => 0,
-                    Err(e) => return Err(format!("查询知识项节点是否存在失败 (label={}): {}", canonical_name, e)),
-                };
-
-                if existing > 0 { continue; }
-
-                // 使用 knowledge_item 的实际 id 作为节点 id，保证边引用正确
-                conn.execute(
-                    "INSERT INTO graph_nodes (id, kb_id, node_type, label, path, aliases, tags, summary, source_count, in_degree, out_degree, status, source_id, page_id, confidence, created_at, metadata)
-                     VALUES (?1, ?2, ?3, ?4, ?5, '', '', '', 0, 0, 0, 'active', ?6, ?7, 'medium', '', '{}')",
-                    rusqlite::params![ki_id, kb_id, item_type, canonical_name, page_path, source_id, ki_id],
-                ).map_err(|e| format!("插入 knowledge_item 节点失败: {}", e))?;
-            }
-        }
-
-        // 3. 从 sources 生成 source 节点
+        // 2. Generate source nodes from sources table
         {
             let mut src_stmt = conn.prepare(
                 "SELECT id, file_name, file_path FROM sources WHERE kb_id = ?1"
-            ).map_err(|e| format!("准备 sources 查询失败: {}", e))?;
+            ).map_err(|e| format!("?? sources ????: {}", e))?;
 
             let src_items: Vec<(String, String, String)> = src_stmt
                 .query_map(rusqlite::params![kb_id], |row| {
                     Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-                }).map_err(|e| format!("查询 sources 失败: {}", e))?
+                }).map_err(|e| format!("?? sources ??: {}", e))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("读取 source 节点行失败: {}", e))?;
+                .map_err(|e| format!("?? source ?????: {}", e))?;
 
             for (_id, file_name, file_path) in &src_items {
                 let existing: i64 = match conn.query_row(
@@ -320,7 +234,7 @@ impl GraphService {
                 ) {
                     Ok(c) => c,
                     Err(rusqlite::Error::QueryReturnedNoRows) => 0,
-                    Err(e) => return Err(format!("查询 source 节点是否存在失败 (label={}): {}", file_name, e)),
+                    Err(e) => return Err(format!("?? source ???????? (label={}): {}", file_name, e)),
                 };
 
                 if existing > 0 { continue; }
@@ -330,37 +244,18 @@ impl GraphService {
                     "INSERT INTO graph_nodes (id, kb_id, node_type, label, path, aliases, tags, summary, source_count, in_degree, out_degree, status, source_id, page_id, confidence, created_at, metadata)
                      VALUES (?1, ?2, 'source', ?3, ?4, '', '', '', 0, 0, 0, 'active', ?5, '', 'medium', '', '{}')",
                     rusqlite::params![node_id, kb_id, file_name, file_path, _id],
-                ).map_err(|e| format!("插入 source 节点失败: {}", e))?;
-            }
-        }
-
-        // 4. 从 relationships 生成边
-        {
-            let mut rel_stmt = conn.prepare(
-                "SELECT id, source_item_id, target_item_id, relation, COALESCE(confidence,'medium') FROM relationships WHERE kb_id = ?1"
-            ).map_err(|e| format!("准备查询失败: {}", e))?;
-
-            let rel_mapped = rel_stmt.query_map(rusqlite::params![kb_id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
-            }).map_err(|e| format!("查询关系失败: {}", e))?;
-            let rels: Vec<(String, String, String, String, String)> = rel_mapped
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("读取关系边行失败: {}", e))?;
-
-            for (_id, source, target, relation, confidence) in rels {
-                let edge_id = uuid::Uuid::new_v4().to_string();
-                conn.execute(
-                    "INSERT INTO graph_edges (id, kb_id, source_node_id, target_node_id, edge_type, relation, confidence, evidence_source_id, evidence_location, citation_status, created_by_task, created_at, metadata)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', '', 'uncited', '', '', '{}')",
-                    rusqlite::params![edge_id, kb_id, source, target, relation, relation, confidence],
-                ).map_err(|e| format!("插入边失败: {}", e))?;
+                ).map_err(|e| format!("?? source ????: {}", e))?;
             }
         }
 
         Ok(())
     }
 
-    /// 从已有数据自动推导关系（知识项→Wiki页面 的 page_path 链接）
+    /// Deprecated: use sync_from_wiki_pages instead. Backward compatibility wrapper.
+    pub fn sync_from_knowledge_items(db: &Arc<DatabaseService>, kb_id: &str) -> Result<(), String> {
+        Self::sync_from_wiki_pages(db, kb_id)
+    }
+
     pub fn derive_relationships(db: &Arc<DatabaseService>, kb_id: &str) -> Result<usize, String> {
         let conn = db.connect()?;
         let mut created = 0usize;
